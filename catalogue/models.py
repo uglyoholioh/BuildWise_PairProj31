@@ -3,9 +3,20 @@ from django.db import models
 
 
 class Component(models.Model):
-    category = models.CharField(max_length=40)
+    class Category(models.TextChoices):
+        CPU = "cpu", "CPU"
+        MOTHERBOARD = "motherboard", "Motherboard"
+        MEMORY = "memory", "Memory"
+        GPU = "gpu", "Graphics card"
+        STORAGE = "storage", "Storage"
+        POWER_SUPPLY = "power_supply", "Power supply"
+        CASE = "case", "Case"
+        COOLER = "cooler", "CPU cooler"
+
+    category = models.CharField(max_length=40, choices=Category.choices)
     brand = models.CharField(max_length=100)
     model = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
     specs = models.JSONField(default=dict, blank=True)
     socket = models.CharField(max_length=40, blank=True)
     memory_type = models.CharField(max_length=40, blank=True)
@@ -13,6 +24,9 @@ class Component(models.Model):
     ml_tier = models.CharField(max_length=40, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(price__gt=0), name="component_price_positive")]
 
     def __str__(self):
         return f"{self.brand} {self.model}"
