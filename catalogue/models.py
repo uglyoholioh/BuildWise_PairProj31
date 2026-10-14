@@ -79,6 +79,14 @@ class ConfigurationItem(models.Model):
     component = models.ForeignKey(Component, on_delete=models.PROTECT)
     quantity = models.PositiveSmallIntegerField(default=1)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("configuration", "component"), name="unique_component_per_configuration"
+            ),
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="configuration_quantity_positive"),
+        ]
+
 
 class Accessory(models.Model):
     name = models.CharField(max_length=160)
@@ -94,3 +102,6 @@ class AssemblyFeeSetting(models.Model):
     fee_amount = models.DecimalField(max_digits=10, decimal_places=2)
     updated_by = models.ForeignKey("accounts.Employee", on_delete=models.PROTECT)
     updated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(fee_amount__gte=0), name="assembly_fee_nonnegative")]
