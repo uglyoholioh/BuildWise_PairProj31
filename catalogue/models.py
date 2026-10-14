@@ -32,6 +32,31 @@ class Component(models.Model):
         return f"{self.brand} {self.model}"
 
 
+class ComponentConflict(models.Model):
+    component_a = models.ForeignKey(
+        Component, on_delete=models.PROTECT, related_name="conflicts_as_a"
+    )
+    component_b = models.ForeignKey(
+        Component, on_delete=models.PROTECT, related_name="conflicts_as_b"
+    )
+    reason = models.TextField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("component_a", "component_b"), name="unique_component_conflict_pair"
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.component_a_id and self.component_b_id and self.component_a_id > self.component_b_id:
+            self.component_a_id, self.component_b_id = self.component_b_id, self.component_a_id
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.component_a} / {self.component_b}"
+
+
 class Configuration(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"

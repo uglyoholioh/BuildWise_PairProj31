@@ -13,6 +13,7 @@
       {% if user.is_authenticated %}
       {% if user.is_active and user.employee_profile.active %}
       <a class="nav-link text-light ms-3" href="{% url 'catalogue:component_list' %}">Components</a>
+      <a class="nav-link text-light ms-2" href="{% url 'catalogue:compatibility_rules' %}">Compatibility</a>
       {% endif %}
       <form class="ms-auto" method="post" action="{% url 'accounts:logout' %}">
         {% csrf_token %}

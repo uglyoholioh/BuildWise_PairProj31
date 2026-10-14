@@ -2,15 +2,8 @@ from decimal import Decimal
 
 from django import forms
 
-from .models import Component
-
-
-REQUIRED_SPECS = {
-    Component.Category.CPU: ("socket",),
-    Component.Category.MOTHERBOARD: ("socket", "memory_type", "form_factor"),
-    Component.Category.MEMORY: ("memory_type",),
-    Component.Category.CASE: ("form_factor",),
-}
+from .compatibility import REQUIRED_SPECS
+from .models import Component, ComponentConflict
 
 
 class ComponentForm(forms.ModelForm):
@@ -38,4 +31,33 @@ class ComponentForm(forms.ModelForm):
         for field in REQUIRED_SPECS.get(cleaned_data.get("category"), ()):
             if not cleaned_data.get(field):
                 self.add_error(field, "This specification is required for the selected category.")
+        return cleaned_data
+
+
+class ComponentConflictForm(forms.ModelForm):
+    class Meta:
+        model = ComponentConflict
+        fields = ("component_a", "component_b", "reason")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+            )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        component_a = cleaned_data.get("component_a")
+        component_b = cleaned_data.get("component_b")
+        if component_a and component_b:
+            if component_a.pk == component_b.pk:
+                self.add_error("component_b", "Choose two different components.")
+            else:
+                a_id, b_id = sorted((component_a.pk, component_b.pk))
+                duplicate = ComponentConflict.objects.filter(
+                    component_a_id=a_id, component_b_id=b_id
+                ).exclude(pk=self.instance.pk)
+                if duplicate.exists():
+                    self.add_error("component_b", "This incompatibility is already recorded.")
         return cleaned_data

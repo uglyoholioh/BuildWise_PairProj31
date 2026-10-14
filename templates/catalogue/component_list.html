@@ -8,7 +8,10 @@
     <h1 class="h3 mb-1">Component catalogue</h1>
     <p class="text-body-secondary mb-0">Maintain component specifications, prices and availability.</p>
   </div>
-  <a class="btn btn-primary" href="{% url 'catalogue:component_create' %}">Add component</a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-primary" href="{% url 'catalogue:compatibility_rules' %}">Compatibility rules</a>
+    <a class="btn btn-primary" href="{% url 'catalogue:component_create' %}">Add component</a>
+  </div>
 </div>
 
 {% for message in messages %}
