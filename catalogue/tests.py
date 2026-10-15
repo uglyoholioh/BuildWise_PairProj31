@@ -1,11 +1,14 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
+from decimal import Decimal
 
 from accounts.models import Customer, Employee, StaffAction
-from .forms import ComponentForm
+from inventory.models import Reservation, StockAdjustment
 from .compatibility import check_compatibility
-from .models import Component, ComponentConflict, Configuration
+from .forms import ComponentForm
+from .models import AssemblyFeeSetting, Component, ComponentConflict, Configuration
+from .pricing import available_preset_quantity, calculate_pc_price
 
 
 class ComponentFormTests(TestCase):
@@ -175,3 +178,101 @@ class CompatibilityCheckerTests(TestCase):
         self.assertRedirects(response, reverse("catalogue:component_list"))
         preset.refresh_from_db()
         self.assertEqual(preset.status, Configuration.Status.DRAFT)
+
+
+class PresetManagementTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(username="manager", password="safe-pass-123")
+        self.employee = Employee.objects.create(user=user, role=Employee.Role.MANAGER)
+        self.client.login(username="manager", password="safe-pass-123")
+
+    def create_components(self):
+        specs = {
+            Component.Category.CPU: {"socket": "AM5"},
+            Component.Category.MOTHERBOARD: {
+                "socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"
+            },
+            Component.Category.MEMORY: {"memory_type": "DDR5"},
+            Component.Category.GPU: {},
+            Component.Category.STORAGE: {},
+            Component.Category.POWER_SUPPLY: {},
+            Component.Category.CASE: {"form_factor": "ATX"},
+        }
+        return [
+            Component.objects.create(
+                category=category,
+                brand="Example",
+                model=category,
+                price=Decimal("100.00"),
+                **spec,
+            )
+            for category, spec in specs.items()
+        ]
+
+    def preset_data(self, components, status=Configuration.Status.PUBLISHED):
+        data = {
+            "name": "BuildWise One",
+            "description": "A test preset",
+            "image": "",
+            "status": status,
+            "items-TOTAL_FORMS": "8",
+            "items-INITIAL_FORMS": "0",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "8",
+        }
+        for index, component in enumerate(components):
+            data[f"items-{index}-component"] = str(component.pk)
+            data[f"items-{index}-quantity"] = (
+                "2" if component.category == Component.Category.MEMORY else "1"
+            )
+        data["items-7-component"] = ""
+        data["items-7-quantity"] = ""
+        return data
+
+    def test_publishing_requires_complete_configuration_and_fee(self):
+        cpu = self.create_components()[0]
+        AssemblyFeeSetting.objects.create(fee_amount="25.00", updated_by=self.employee)
+
+        response = self.client.post(
+            reverse("catalogue:preset_create"), self.preset_data([cpu])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Configuration.objects.count(), 0)
+        self.assertContains(response, "missing required categories")
+
+    def test_manager_can_publish_compatible_preset_at_shared_price(self):
+        components = self.create_components()
+        AssemblyFeeSetting.objects.create(fee_amount="25.00", updated_by=self.employee)
+        for component in components:
+            StockAdjustment.objects.create(
+                item_type="component", component=component, delta=4,
+                reason="Opening stock", created_by=self.employee,
+            )
+            Reservation.objects.create(component=component, quantity=1)
+
+        response = self.client.post(
+            reverse("catalogue:preset_create"), self.preset_data(components)
+        )
+
+        self.assertRedirects(response, reverse("catalogue:preset_manage_list"))
+        configuration = Configuration.objects.get()
+        self.assertEqual(configuration.status, Configuration.Status.PUBLISHED)
+        items = list(configuration.items.select_related("component"))
+        self.assertEqual(calculate_pc_price(items, Decimal("25.00")), Decimal("825.00"))
+        self.assertEqual(available_preset_quantity(items), 1)
+        self.assertContains(self.client.get(reverse("catalogue:preset_manage_list")), "$825.00")
+
+    def test_only_active_manager_can_change_shared_fee(self):
+        response = self.client.post(
+            reverse("catalogue:assembly_fee"), {"fee_amount": "30.00"}
+        )
+        self.assertRedirects(response, reverse("catalogue:assembly_fee"))
+        self.assertEqual(AssemblyFeeSetting.objects.latest("pk").fee_amount, Decimal("30.00"))
+
+        employee_user = User.objects.create_user(username="employee", password="safe-pass-123")
+        Employee.objects.create(user=employee_user)
+        self.client.logout()
+        self.client.login(username="employee", password="safe-pass-123")
+        response = self.client.get(reverse("catalogue:assembly_fee"))
+        self.assertEqual(response.status_code, 302)
