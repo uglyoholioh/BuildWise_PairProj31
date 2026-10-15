@@ -1,9 +1,11 @@
 from decimal import Decimal
 
 from django import forms
+from django.core.exceptions import ValidationError
+from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from .compatibility import REQUIRED_SPECS
-from .models import Component, ComponentConflict
+from .models import Component, ComponentConflict, Configuration, ConfigurationItem
 
 
 class ComponentForm(forms.ModelForm):
@@ -61,3 +63,65 @@ class ComponentConflictForm(forms.ModelForm):
                 if duplicate.exists():
                     self.add_error("component_b", "This incompatibility is already recorded.")
         return cleaned_data
+
+
+class ConfigurationForm(forms.ModelForm):
+    class Meta:
+        model = Configuration
+        fields = ("name", "description", "image", "status")
+        help_texts = {"image": "Enter an image URL or project-relative path."}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+            )
+
+
+class ConfigurationItemForm(forms.ModelForm):
+    quantity = forms.IntegerField(min_value=1)
+
+    class Meta:
+        model = ConfigurationItem
+        fields = ("component", "quantity")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["component"].queryset = Component.objects.order_by("category", "brand", "model")
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+
+
+class BaseConfigurationItemFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        selected = [
+            form.cleaned_data["component"]
+            for form in self.forms
+            if form.cleaned_data and not form.cleaned_data.get("DELETE") and form.cleaned_data.get("component")
+        ]
+        if len(selected) != len(set(selected)):
+            raise ValidationError("Choose each component once and set its quantity on that row.")
+
+
+ConfigurationItemFormSet = inlineformset_factory(
+    Configuration,
+    ConfigurationItem,
+    form=ConfigurationItemForm,
+    formset=BaseConfigurationItemFormSet,
+    extra=8,
+    max_num=8,
+    can_delete=True,
+    validate_max=True,
+)
+
+
+class AssemblyFeeForm(forms.Form):
+    fee_amount = forms.DecimalField(min_value=Decimal("0.00"), max_digits=10, decimal_places=2)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["fee_amount"].widget.attrs["class"] = "form-control"

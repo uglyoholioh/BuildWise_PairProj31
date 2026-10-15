@@ -7,6 +7,15 @@ REQUIRED_SPECS = {
     Component.Category.MEMORY: ("memory_type",),
     Component.Category.CASE: ("form_factor",),
 }
+REQUIRED_CONFIGURATION_CATEGORIES = (
+    Component.Category.CPU,
+    Component.Category.MOTHERBOARD,
+    Component.Category.MEMORY,
+    Component.Category.GPU,
+    Component.Category.STORAGE,
+    Component.Category.POWER_SUPPLY,
+    Component.Category.CASE,
+)
 
 
 def component_name(component):
@@ -64,8 +73,22 @@ def check_compatibility(components):
     return problems
 
 
+def check_configuration_components(components):
+    components = list(components)
+    categories = {component.category for component in components}
+    missing = [
+        dict(Component.Category.choices)[category]
+        for category in REQUIRED_CONFIGURATION_CATEGORIES
+        if category not in categories
+    ]
+    problems = check_compatibility(components)
+    if missing:
+        problems.insert(0, f"Configuration is missing required categories: {', '.join(missing)}.")
+    return problems
+
+
 def check_configuration(configuration):
-    return check_compatibility(configuration.components.all())
+    return check_configuration_components(configuration.components.all())
 
 
 def revalidate_configurations(components):
