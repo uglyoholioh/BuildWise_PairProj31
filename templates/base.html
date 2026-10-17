@@ -16,6 +16,7 @@
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:compatibility_rules' %}">Compatibility</a>
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:preset_manage_list' %}">Presets</a>
       <a class="nav-link text-light ms-2" href="{% url 'inventory:inventory_dashboard' %}">Inventory</a>
+      <a class="nav-link text-light ms-2" href="{% url 'orders:order_queue' %}">Orders</a>
       {% if user.employee_profile.role == "manager" %}
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:assembly_fee' %}">Assembly fee</a>
       {% endif %}
