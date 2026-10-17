@@ -6,10 +6,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from accounts.models import StaffAction
-from inventory.models import Reservation
+from inventory.availability import available_component_quantity
+from inventory.models import Reservation, StockAdjustment
 from .allocations import accessory_allocation_issues, purchased_pc_allocation_issues
-from .forms import HoldPCForm
-from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC
+from .forms import HoldPCForm, QualityCheckForm
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck
 
 
 def placeholder(request, *args, **kwargs):
@@ -37,7 +38,10 @@ def order_queue(request):
         order.accessory_allocation_issues = accessory_allocation_issues(order) if order.is_accessory_only else []
         for line in lines:
             for purchased_pc in line.pcs.all():
-                purchased_pc.allocation_issues = purchased_pc_allocation_issues(purchased_pc)
+                purchased_pc.allocation_issues = (
+                    [] if purchased_pc.status == "quality_passed"
+                    else purchased_pc_allocation_issues(purchased_pc)
+                )
     return render(request, "orders/order_queue.html", {"orders": orders})
 
 
@@ -116,6 +120,128 @@ def start_order(request, pk):
                     detail=f"Started assembly for PC #{pc.pk} in order #{order.pk}.",
                 )
                 messages.success(request, f"Assembly started for PC #{pc.pk}.")
+    return redirect("orders:order_queue")
+
+
+@require_POST
+def start_quality_check(request, pk):
+    order_id = _order_id_for_pc(pk)
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
+        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        if order.status in ("cancelled", "delivered") or pc.status != "assembling":
+            messages.error(request, "This PC is not ready for quality checks.")
+        else:
+            pc.status = "quality_checking"
+            pc.save(update_fields=("status",))
+            StaffAction.objects.create(
+                employee=request.user.employee_profile,
+                action_type="pc_quality_check_started",
+                object_ref=str(pc.pk),
+                detail=f"Started quality checks for PC #{pc.pk}.",
+            )
+            messages.success(request, f"Quality checks started for PC #{pc.pk}.")
+    return redirect("orders:order_queue")
+
+
+@require_POST
+def record_quality_check(request, pk):
+    order_id = _order_id_for_pc(pk)
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
+        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        form = QualityCheckForm(request.POST, purchased_pc=pc)
+        if not form.is_valid():
+            messages.error(request, "Choose a check, and include a reason when it fails.")
+        elif order.status in ("cancelled", "delivered") or pc.status not in (
+            "quality_checking", "corrective_work"
+        ):
+            messages.error(request, "This PC is not accepting quality checks.")
+        else:
+            passed = form.cleaned_data["passed"] == "yes"
+            note = form.cleaned_data["note"].strip()
+            check = QualityCheck.objects.create(
+                purchased_pc=pc,
+                employee=request.user.employee_profile,
+                stage="quality_checking",
+                checklist_item=form.cleaned_data["checklist_item"],
+                passed=passed,
+                note=note,
+            )
+            faulty = form.cleaned_data["faulty_component"]
+            if not passed:
+                pc.status = "on_hold"
+                pc.hold_reason = note
+                if faulty:
+                    reservations = Reservation.objects.select_for_update().filter(
+                        purchased_pc=pc,
+                        component=faulty,
+                        status=Reservation.Status.RESERVED,
+                    ).order_by("pk")
+                    reservation = reservations.first()
+                    if reservation:
+                        available = available_component_quantity(faulty)
+                        if available < 1:
+                            if reservation.quantity == 1:
+                                reservation.status = Reservation.Status.RELEASED
+                                reservation.save(update_fields=("status",))
+                            else:
+                                reservation.quantity -= 1
+                                reservation.save(update_fields=("quantity",))
+                        StockAdjustment.objects.create(
+                            item_type="component",
+                            component=faulty,
+                            delta=-1,
+                            reason=f"Faulty part removed from PC #{pc.pk}: {note}",
+                            created_by=request.user.employee_profile,
+                        )
+                        if available > 0:
+                            pc.status = "corrective_work"
+                            pc.hold_reason = "A working replacement is reserved; retest this check."
+                        else:
+                            pc.hold_reason = f"{note} No working unit is available; use a US-A11 substitution."
+                pc.save(update_fields=("status", "hold_reason"))
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="pc_quality_check_failed",
+                    object_ref=str(pc.pk),
+                    detail=f"{dict(QualityCheckForm.CHECKS)[check.checklist_item]}: {pc.hold_reason}",
+                )
+                messages.error(request, f"PC #{pc.pk} needs corrective work: {pc.hold_reason}")
+            else:
+                latest = {}
+                for row in pc.quality_checks.order_by("created_at", "pk"):
+                    latest[row.checklist_item] = row.passed
+                required = {key for key, _ in QualityCheckForm.CHECKS}
+                if required <= latest.keys() and all(latest[key] for key in required):
+                    for reservation in Reservation.objects.select_for_update().filter(
+                        purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
+                    ).select_related("component"):
+                        StockAdjustment.objects.create(
+                            item_type="component",
+                            component=reservation.component,
+                            delta=-reservation.quantity,
+                            reason=f"PC #{pc.pk} passed quality checks; components installed.",
+                            created_by=request.user.employee_profile,
+                        )
+                        reservation.status = Reservation.Status.CONSUMED
+                        reservation.save(update_fields=("status",))
+                    pc.status = "quality_passed"
+                    pc.hold_reason = ""
+                    pc.save(update_fields=("status", "hold_reason"))
+                    StaffAction.objects.create(
+                        employee=request.user.employee_profile,
+                        action_type="pc_quality_passed",
+                        object_ref=str(pc.pk),
+                        detail=f"PC #{pc.pk} passed all quality checks; reserved components consumed.",
+                    )
+                    messages.success(request, f"PC #{pc.pk} passed quality checks.")
+                elif pc.status == "corrective_work":
+                    pc.status = "quality_checking"
+                    pc.save(update_fields=("status",))
+                    messages.success(request, "Check recorded; continue the remaining tests.")
+                else:
+                    messages.success(request, "Check recorded.")
     return redirect("orders:order_queue")
 
 
