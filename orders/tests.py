@@ -6,8 +6,8 @@ from django.urls import reverse
 
 from accounts.models import Customer, Employee, StaffAction
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
-from inventory.models import Reservation
-from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC
+from inventory.models import Reservation, StockAdjustment
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck
 
 
 class OrderQueueTests(TestCase):
@@ -151,3 +151,89 @@ class OrderQueueTests(TestCase):
 
         order.refresh_from_db()
         self.assertEqual(order.status, "in_progress")
+
+    def test_passing_all_quality_checks_consumes_allocations_once(self):
+        order, pc = self.create_paid_build_pc()
+        StockAdjustment.objects.create(
+            item_type="component", component=self.component, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_order", args=[pc.pk]))
+        self.client.post(reverse("orders:start_quality_check", args=[pc.pk]))
+
+        for item in ("installed_parts", "startup", "stability"):
+            response = self.client.post(
+                reverse("orders:record_quality_check", args=[pc.pk]),
+                {"checklist_item": item, "passed": "yes", "note": "Verified"},
+            )
+            self.assertEqual(response.status_code, 302)
+
+        pc.refresh_from_db()
+        reservation = Reservation.objects.get(purchased_pc=pc)
+        self.assertEqual(pc.status, "quality_passed")
+        self.assertEqual(reservation.status, Reservation.Status.CONSUMED)
+        self.assertEqual(
+            StockAdjustment.objects.filter(reason__contains="passed quality checks").count(), 1
+        )
+        self.client.post(
+            reverse("orders:record_quality_check", args=[pc.pk]),
+            {"checklist_item": "stability", "passed": "yes"},
+        )
+        self.assertEqual(
+            StockAdjustment.objects.filter(reason__contains="passed quality checks").count(), 1
+        )
+        self.assertEqual(QualityCheck.objects.filter(purchased_pc=pc).count(), 3)
+
+    def test_failed_faulty_part_is_removed_and_pc_held_for_substitution_if_unavailable(self):
+        _, pc = self.create_paid_build_pc()
+        StockAdjustment.objects.create(
+            item_type="component", component=self.component, delta=1,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_order", args=[pc.pk]))
+        self.client.post(reverse("orders:start_quality_check", args=[pc.pk]))
+
+        self.client.post(
+            reverse("orders:record_quality_check", args=[pc.pk]),
+            {
+                "checklist_item": "installed_parts", "passed": "no",
+                "faulty_component": self.component.pk, "note": "Fan does not spin",
+            },
+        )
+
+        pc.refresh_from_db()
+        reservation = Reservation.objects.get(purchased_pc=pc)
+        self.assertEqual(pc.status, "on_hold")
+        self.assertIn("US-A11", pc.hold_reason)
+        self.assertEqual(reservation.status, Reservation.Status.RELEASED)
+        self.assertEqual(StockAdjustment.objects.order_by("-pk").first().delta, -1)
+
+    def test_failed_faulty_part_with_spare_stock_enters_corrective_work_and_can_pass_retest(self):
+        _, pc = self.create_paid_build_pc()
+        StockAdjustment.objects.create(
+            item_type="component", component=self.component, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_order", args=[pc.pk]))
+        self.client.post(reverse("orders:start_quality_check", args=[pc.pk]))
+        self.client.post(
+            reverse("orders:record_quality_check", args=[pc.pk]),
+            {
+                "checklist_item": "installed_parts", "passed": "no",
+                "faulty_component": self.component.pk, "note": "First unit was faulty",
+            },
+        )
+        pc.refresh_from_db()
+        self.assertEqual(pc.status, "corrective_work")
+
+        for item in ("installed_parts", "startup", "stability"):
+            self.client.post(
+                reverse("orders:record_quality_check", args=[pc.pk]),
+                {"checklist_item": item, "passed": "yes", "note": "Retested"},
+            )
+
+        pc.refresh_from_db()
+        self.assertEqual(pc.status, "quality_passed")
+        self.assertEqual(
+            StockAdjustment.objects.filter(reason__contains="passed quality checks").count(), 1
+        )
