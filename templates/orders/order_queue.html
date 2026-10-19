@@ -18,6 +18,7 @@
     <div class="card-body">
       <h3 class="h6">Delivery</h3>
       <p>{{ order.delivery_name }}<br>{{ order.delivery_address }}{% if order.delivery_phone %}<br>{{ order.delivery_phone }}{% endif %}</p>
+      {% if order.shipment %}<p class="small">Shipment: {{ order.shipment.status }}{% if order.shipment.courier %} · {{ order.shipment.courier }}{% endif %}{% if order.shipment.tracking_ref %} · Tracking {{ order.shipment.tracking_ref }}{% endif %}</p>{% endif %}
       <h3 class="h6">Items and allocations</h3>
       <div class="list-group">
         {% for line in order.lines.all %}
@@ -62,9 +63,17 @@
           </div>
         {% empty %}<p class="text-body-secondary">No line items.</p>{% endfor %}
       </div>
-      {% if order.is_accessory_only %}
-        {% if order.accessory_allocation_issues %}<p class="small text-danger mt-3">{{ order.accessory_allocation_issues|join:" " }}</p>{% elif order.status == "placed" %}<form class="mt-3" method="post" action="{% url 'orders:start_packing' order.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Start packing</button></form>{% endif %}
+      {% if order.accessory_allocation_issues %}<p class="small text-danger mt-3">{{ order.accessory_allocation_issues|join:" " }}</p>{% endif %}
+      {% if order.can_start_packing %}<form class="mt-3" method="post" action="{% url 'orders:start_packing' order.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Mark order packed</button></form>{% endif %}
+      {% if order.can_dispatch %}
+        <form class="row g-2 mt-2" method="post" action="{% url 'orders:dispatch_order' order.pk %}">
+          {% csrf_token %}
+          <div class="col-md-4"><label class="form-label small" for="courier-{{ order.pk }}">Courier (optional)</label><input class="form-control form-control-sm" id="courier-{{ order.pk }}" name="courier"></div>
+          <div class="col-md-4"><label class="form-label small" for="tracking-{{ order.pk }}">Tracking reference (optional)</label><input class="form-control form-control-sm" id="tracking-{{ order.pk }}" name="tracking_ref"></div>
+          <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Dispatch order</button></div>
+        </form>
       {% endif %}
+      {% if order.status == "dispatched" %}<form class="mt-2" method="post" action="{% url 'orders:staff_confirm_delivery' order.pk %}">{% csrf_token %}<button class="btn btn-outline-primary btn-sm" type="submit">Confirm delivery</button></form>{% endif %}
     </div>
   </section>
 {% empty %}

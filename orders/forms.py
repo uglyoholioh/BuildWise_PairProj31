@@ -44,3 +44,13 @@ class QualityCheckForm(forms.Form):
         if cleaned_data.get("passed") == "no" and not cleaned_data.get("note", "").strip():
             self.add_error("note", "Record why this check failed.")
         return cleaned_data
+
+
+class DispatchForm(forms.Form):
+    courier = forms.CharField(required=False, max_length=100)
+    tracking_ref = forms.CharField(required=False, max_length=120)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control form-control-sm"

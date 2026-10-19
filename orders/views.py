@@ -3,14 +3,15 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.models import StaffAction
 from inventory.availability import available_component_quantity
 from inventory.models import Reservation, StockAdjustment
 from .allocations import accessory_allocation_issues, purchased_pc_allocation_issues
-from .forms import HoldPCForm, QualityCheckForm
-from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck
+from .forms import DispatchForm, HoldPCForm, QualityCheckForm
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment
 
 
 def placeholder(request, *args, **kwargs):
@@ -35,13 +36,26 @@ def order_queue(request):
     for order in orders:
         lines = list(order.lines.all())
         order.is_accessory_only = bool(lines) and all(line.kind == "accessory" for line in lines)
-        order.accessory_allocation_issues = accessory_allocation_issues(order) if order.is_accessory_only else []
+        order.accessory_allocation_issues = accessory_allocation_issues(order)
         for line in lines:
             for purchased_pc in line.pcs.all():
                 purchased_pc.allocation_issues = (
                     [] if purchased_pc.status == "quality_passed"
                     else purchased_pc_allocation_issues(purchased_pc)
                 )
+        pcs = [pc for line in lines for pc in line.pcs.all()]
+        order.pcs_ready = (
+            all(line.kind != "build" or line.pcs.count() == line.quantity for line in lines)
+            and all(pc.status in ("quality_passed", "cancelled") for pc in pcs)
+        )
+        order.can_start_packing = (
+            order.payment_status == "paid"
+            and order.status == ("in_progress" if any(line.kind == "build" for line in lines) else "placed")
+            and bool(lines)
+            and order.pcs_ready
+            and not accessory_allocation_issues(order)
+        )
+        order.can_dispatch = order.payment_status == "paid" and order.status == "packing" and order.pcs_ready and not order.accessory_allocation_issues
     return render(request, "orders/order_queue.html", {"orders": orders})
 
 
@@ -280,29 +294,141 @@ def start_packing(request, pk):
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
         lines = list(order.lines.all())
-        if order.payment_status != "paid" or not lines or any(line.kind != "accessory" for line in lines):
-            messages.error(request, "Only paid accessory-only orders can enter the packing queue.")
-        elif order.status == "placed":
+        pcs = list(PurchasedPC.objects.filter(order_line__order=order))
+        has_builds = any(line.kind == "build" for line in lines)
+        eligible_status = order.status == ("in_progress" if has_builds else "placed")
+        if order.payment_status != "paid" or not lines:
+            messages.error(request, "Only paid orders can enter the packing queue.")
+        elif eligible_status and all(line.kind != "build" or line.pcs.count() == line.quantity for line in lines) and all(pc.status in ("quality_passed", "cancelled") for pc in pcs):
             issues = accessory_allocation_issues(order)
             if issues:
                 messages.error(request, "Cannot start packing: " + " ".join(issues))
             else:
+                previous_status = order.status
                 order.status = "packing"
                 order.save(update_fields=("status",))
                 OrderStatusHistory.objects.create(
                     order=order,
-                    from_status="placed",
+                    from_status=previous_status,
                     to_status="packing",
                     note="Accessory-only order packing started.",
                     employee=request.user.employee_profile,
                 )
                 StaffAction.objects.create(
                     employee=request.user.employee_profile,
-                    action_type="accessory_packing_started",
+                    action_type="order_packing_started",
                     object_ref=str(order.pk),
-                    detail=f"Started packing accessory-only order #{order.pk}.",
+                    detail=f"Started packing order #{order.pk}.",
                 )
                 messages.success(request, f"Packing started for order #{order.pk}.")
         else:
             messages.error(request, "This order is no longer waiting to be packed.")
     return redirect("orders:order_queue")
+
+
+@require_POST
+def dispatch_order(request, pk):
+    form = DispatchForm(request.POST)
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        lines = list(order.lines.all())
+        pcs = list(PurchasedPC.objects.select_for_update().filter(order_line__order=order))
+        if not form.is_valid():
+            messages.error(request, "Enter valid courier and tracking details.")
+        elif order.payment_status != "paid" or order.status != "packing" or not lines:
+            messages.error(request, "This order is not ready for dispatch.")
+        elif any(line.kind == "build" and line.pcs.count() != line.quantity for line in lines) or any(pc.status not in ("quality_passed", "cancelled") for pc in pcs):
+            messages.error(request, "Every remaining PC must pass quality checks before dispatch.")
+        else:
+            issues = accessory_allocation_issues(order)
+            if issues:
+                messages.error(request, "Cannot dispatch: " + " ".join(issues))
+            else:
+                reservations = Reservation.objects.select_for_update().filter(
+                    order_line__order=order,
+                    status=Reservation.Status.RESERVED,
+                    accessory__isnull=False,
+                ).select_related("accessory")
+                for reservation in reservations:
+                    StockAdjustment.objects.create(
+                        item_type="accessory",
+                        accessory=reservation.accessory,
+                        delta=-reservation.quantity,
+                        reason=f"Accessory order #{order.pk} dispatched.",
+                        created_by=request.user.employee_profile,
+                    )
+                    reservation.status = Reservation.Status.CONSUMED
+                    reservation.save(update_fields=("status",))
+                now = timezone.now()
+                Shipment.objects.create(
+                    order=order,
+                    status="dispatched",
+                    courier=form.cleaned_data["courier"],
+                    tracking_ref=form.cleaned_data["tracking_ref"],
+                    dispatched_at=now,
+                )
+                order.status = "dispatched"
+                order.save(update_fields=("status",))
+                OrderStatusHistory.objects.create(
+                    order=order,
+                    from_status="packing",
+                    to_status="dispatched",
+                    note="Order dispatched.",
+                    employee=request.user.employee_profile,
+                )
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="order_dispatched",
+                    object_ref=str(order.pk),
+                    detail=f"Dispatched order #{order.pk}; tracking {form.cleaned_data['tracking_ref'] or 'not provided'}.",
+                )
+                messages.success(request, f"Order #{order.pk} dispatched.")
+    return redirect("orders:order_queue")
+
+
+def _confirm_delivery(request, order, confirmed_by, employee=None):
+    shipment = get_object_or_404(Shipment.objects.select_for_update(), order=order)
+    if shipment.status == "dispatched":
+        shipment.status = "delivered"
+        shipment.delivered_at = timezone.now()
+        shipment.confirmed_by = confirmed_by
+        shipment.save(update_fields=("status", "delivered_at", "confirmed_by"))
+        order.status = "delivered"
+        order.save(update_fields=("status",))
+        OrderStatusHistory.objects.create(
+            order=order,
+            from_status="dispatched",
+            to_status="delivered",
+            note="Delivery confirmed.",
+            employee=employee,
+        )
+        if employee:
+            StaffAction.objects.create(
+                employee=employee,
+                action_type="order_delivery_confirmed",
+                object_ref=str(order.pk),
+                detail=f"Confirmed delivery for order #{order.pk}.",
+            )
+        messages.success(request, "Delivery confirmed.")
+    else:
+        messages.info(request, "This delivery has already been confirmed or is not dispatched.")
+
+
+@require_POST
+def staff_confirm_delivery(request, pk):
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        employee = request.user.employee_profile
+        _confirm_delivery(request, order, f"staff:{employee.pk}", employee)
+    return redirect("orders:order_queue")
+
+
+@login_required
+@require_POST
+def confirm_receipt(request, pk):
+    with transaction.atomic():
+        order = get_object_or_404(
+            Order.objects.select_for_update(), pk=pk, customer__user=request.user
+        )
+        _confirm_delivery(request, order, f"customer:{request.user.pk}")
+    return redirect("orders:order_detail", pk=pk)
