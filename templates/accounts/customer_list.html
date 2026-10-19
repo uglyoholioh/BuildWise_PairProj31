@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Customer records | BuildWise{% endblock %}
+
+{% block content %}
+<div class="mb-4"><h1 class="h3 mb-1">Customer records</h1><p class="text-body-secondary mb-0">Search customer name, email or ID. Records are read-only.</p></div>
+<form method="get" class="row g-2 mb-4">
+  <div class="col-sm-8"><label class="visually-hidden" for="customer-search">Customer name, email or ID</label><input id="customer-search" class="form-control" type="search" name="q" value="{{ query }}" placeholder="Name, email or customer ID"></div>
+  <div class="col-auto"><button class="btn btn-primary" type="submit">Search</button></div>
+</form>
+<div class="list-group">
+  {% for customer in customers %}
+    <a class="list-group-item list-group-item-action" href="{% url 'accounts:customer_detail' customer.pk %}"><strong>{{ customer.name }}</strong><span class="text-body-secondary"> · {{ customer.email }} · ID {{ customer.pk }}</span></a>
+  {% empty %}<div class="alert alert-info" role="status">No matching customers.</div>{% endfor %}
+</div>
+{% endblock %}

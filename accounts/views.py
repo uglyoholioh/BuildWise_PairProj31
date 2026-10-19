@@ -4,10 +4,11 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.views import LoginView
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
-from django.shortcuts import redirect
+from django.db.models import Q
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Employee
+from .models import Customer, Employee
 
 
 def active_employee(user):
@@ -44,3 +45,28 @@ def logout_view(request):
 
 def placeholder(request, *args, **kwargs):
     return HttpResponse("Page under construction")
+
+
+@staff_required
+def customer_list(request):
+    query = request.GET.get("q", "").strip()
+    customers = Customer.objects.order_by("name", "pk")
+    if query:
+        filters = Q(name__icontains=query) | Q(email__icontains=query)
+        if query.isdecimal():
+            filters |= Q(pk=int(query))
+        customers = customers.filter(filters)
+    return render(request, "accounts/customer_list.html", {"customers": customers, "query": query})
+
+
+@staff_required
+def customer_detail(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+    orders = customer.orders.select_related("shipment").prefetch_related(
+        "lines__pcs", "status_history__employee__user", "support_requests"
+    ).order_by("-placed_at", "-pk")
+    return render(
+        request,
+        "accounts/customer_detail.html",
+        {"customer": customer, "orders": orders},
+    )
