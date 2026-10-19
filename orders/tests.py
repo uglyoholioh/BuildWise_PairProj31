@@ -3,11 +3,12 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Customer, Employee, StaffAction
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
-from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment
 
 
 class OrderQueueTests(TestCase):
@@ -56,6 +57,29 @@ class OrderQueueTests(TestCase):
             )
         return order, pc
 
+    def create_accessory_order(self, status="placed"):
+        accessory = Accessory.objects.create(
+            name="Mouse", category="peripheral", price=Decimal("25.00")
+        )
+        order = Order.objects.create(
+            customer=self.customer,
+            payment_status="paid",
+            status=status,
+            total_snapshot=Decimal("50.00"),
+            delivery_name="BuildWise Customer",
+            delivery_address="1 Example Road",
+        )
+        line = OrderLine.objects.create(
+            order=order,
+            kind="accessory",
+            name="Mouse",
+            quantity=2,
+            unit_price_snapshot=Decimal("25.00"),
+            accessory=accessory,
+        )
+        Reservation.objects.create(order_line=line, accessory=accessory, quantity=2)
+        return order, accessory
+
     def test_queue_shows_paid_order_delivery_price_and_allocations(self):
         order, pc = self.create_paid_build_pc()
 
@@ -91,25 +115,7 @@ class OrderQueueTests(TestCase):
         self.assertEqual(StaffAction.objects.get().action_type, "pc_allocation_hold")
 
     def test_accessory_only_order_starts_packing_when_reserved(self):
-        accessory = Accessory.objects.create(
-            name="Mouse", category="peripheral", price=Decimal("25.00")
-        )
-        order = Order.objects.create(
-            customer=self.customer,
-            payment_status="paid",
-            total_snapshot=Decimal("25.00"),
-            delivery_name="BuildWise Customer",
-            delivery_address="1 Example Road",
-        )
-        line = OrderLine.objects.create(
-            order=order,
-            kind="accessory",
-            name="Mouse",
-            quantity=2,
-            unit_price_snapshot=Decimal("25.00"),
-            accessory=accessory,
-        )
-        Reservation.objects.create(order_line=line, accessory=accessory, quantity=2)
+        order, _ = self.create_accessory_order()
 
         response = self.client.post(reverse("orders:start_packing", args=[order.pk]))
 
@@ -117,6 +123,57 @@ class OrderQueueTests(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, "packing")
         self.assertEqual(OrderStatusHistory.objects.get().employee, self.employee)
+
+    def test_dispatch_consumes_accessory_reservation_once(self):
+        order, accessory = self.create_accessory_order()
+        StockAdjustment.objects.create(
+            item_type="accessory", accessory=accessory, delta=3,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_packing", args=[order.pk]))
+
+        self.client.post(
+            reverse("orders:dispatch_order", args=[order.pk]),
+            {"courier": "Courier Co", "tracking_ref": "TRACK-123"},
+        )
+
+        order.refresh_from_db()
+        shipment = Shipment.objects.get(order=order)
+        reservation = Reservation.objects.get(order_line__order=order)
+        self.assertEqual(order.status, "dispatched")
+        self.assertEqual(shipment.status, "dispatched")
+        self.assertEqual(shipment.courier, "Courier Co")
+        self.assertEqual(shipment.tracking_ref, "TRACK-123")
+        self.assertIsNotNone(shipment.dispatched_at)
+        self.assertEqual(reservation.status, Reservation.Status.CONSUMED)
+        self.client.post(
+            reverse("orders:dispatch_order", args=[order.pk]),
+            {"courier": "Courier Co", "tracking_ref": "TRACK-123"},
+        )
+        self.assertEqual(Shipment.objects.filter(order=order).count(), 1)
+        self.assertEqual(
+            StockAdjustment.objects.filter(reason__contains="dispatched").count(), 1
+        )
+
+    def test_customer_delivery_confirmation_is_shared_and_idempotent(self):
+        order, _ = self.create_accessory_order(status="dispatched")
+        Shipment.objects.create(
+            order=order, status="dispatched", dispatched_at=timezone.now()
+        )
+        self.client.force_login(self.customer.user)
+
+        self.client.post(reverse("orders:confirm_receipt", args=[order.pk]))
+        shipment = Shipment.objects.get(order=order)
+        delivered_at = shipment.delivered_at
+        self.client.post(reverse("orders:confirm_receipt", args=[order.pk]))
+
+        order.refresh_from_db()
+        shipment.refresh_from_db()
+        self.assertEqual(order.status, "delivered")
+        self.assertEqual(shipment.status, "delivered")
+        self.assertEqual(shipment.confirmed_by, f"customer:{self.customer.user_id}")
+        self.assertEqual(shipment.delivered_at, delivered_at)
+        self.assertEqual(OrderStatusHistory.objects.filter(to_status="delivered").count(), 1)
 
     def test_unpaid_order_cannot_start(self):
         order, pc = self.create_paid_build_pc()
