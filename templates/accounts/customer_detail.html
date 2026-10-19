@@ -16,7 +16,7 @@
       <h3 class="h6">Fulfilment history</h3>
       <ul>{% for event in order.status_history.all %}<li>{{ event.created_at }} · {{ event.from_status|default:"created" }} → {{ event.to_status }}{% if event.employee %} · {{ event.employee.user.username }}{% endif %}{% if event.note %} · {{ event.note }}{% endif %}</li>{% empty %}<li>No status changes recorded.</li>{% endfor %}</ul>
       <h3 class="h6">Support conversations</h3>
-      <ul class="mb-0">{% for request in order.support_requests.all %}<li><a href="{% url 'support:request_detail' request.pk %}">Conversation #{{ request.pk }}</a> · {{ request.status }} · opened {{ request.created_at }}</li>{% empty %}<li>No support conversations.</li>{% endfor %}</ul>
+      <ul class="mb-0">{% for request in order.support_requests.all %}<li><a href="{% url 'support:staff_request_detail' request.pk %}">Conversation #{{ request.pk }}</a> · {{ request.status }} · opened {{ request.created_at }}</li>{% empty %}<li>No support conversations.</li>{% endfor %}</ul>
     </div>
   </section>
 {% empty %}<div class="alert alert-info" role="status">No orders recorded for this customer.</div>{% endfor %}

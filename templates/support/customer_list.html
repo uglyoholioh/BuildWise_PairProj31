@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}My support requests | BuildWise{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-4"><div><h1 class="h3 mb-1">My support requests</h1><p class="text-body-secondary mb-0">Your order-linked conversations and replies.</p></div><a class="btn btn-primary" href="{% url 'support:request_create' %}">New request</a></div>
+<div class="list-group">{% for item in requests %}<a class="list-group-item list-group-item-action" href="{% url 'support:request_detail' item.pk %}">Conversation #{{ item.pk }} · Order #{{ item.order_id }} · {{ item.status }} · {{ item.created_at }}</a>{% empty %}<div class="alert alert-info">You have no support requests yet.</div>{% endfor %}</div>
+{% endblock %}
