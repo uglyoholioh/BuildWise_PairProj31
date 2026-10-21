@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from decimal import Decimal
 
 
 class Order(models.Model):
@@ -29,7 +30,7 @@ class PurchasedPC(models.Model):
     unit_index = models.PositiveSmallIntegerField()
     status = models.CharField(max_length=24, default="queued")
     hold_reason = models.TextField(blank=True)
-    refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
 
 
 class QualityCheck(models.Model):
@@ -71,5 +72,7 @@ class SubstitutionProposal(models.Model):
     spec_differences = models.TextField(blank=True)
     fps_note = models.TextField(blank=True)
     status = models.CharField(max_length=16, default="pending")
+    previous_pc_status = models.CharField(max_length=24, default="queued")
     proposed_at = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.CharField(max_length=32, blank=True)
