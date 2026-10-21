@@ -54,3 +54,31 @@ class DispatchForm(forms.Form):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs["class"] = "form-control form-control-sm"
+
+
+class SubstitutionProposalForm(forms.Form):
+    original_component = forms.ModelChoiceField(queryset=Component.objects.none())
+    replacement_component = forms.ModelChoiceField(queryset=Component.objects.none())
+    reason = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
+    spec_differences = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    fps_note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+
+    def __init__(self, *args, purchased_pc, **kwargs):
+        super().__init__(*args, **kwargs)
+        reserved_ids = Reservation.objects.filter(
+            purchased_pc=purchased_pc,
+            status=Reservation.Status.RESERVED,
+            component__isnull=False,
+        ).values_list("component_id", flat=True)
+        self.fields["original_component"].queryset = Component.objects.filter(pk__in=reserved_ids)
+        self.fields["replacement_component"].queryset = Component.objects.filter(active=True).order_by(
+            "category", "brand", "model"
+        )
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("original_component") == cleaned_data.get("replacement_component"):
+            self.add_error("replacement_component", "Choose a different component as the replacement.")
+        return cleaned_data

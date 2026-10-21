@@ -8,7 +8,7 @@ urlpatterns = [
     path("cart", views.placeholder, name="cart"),
     path("checkout", views.placeholder, name="checkout"),
     path("orders", views.placeholder, name="order_list"),
-    path("orders/<int:pk>", views.placeholder, name="order_detail"),
+    path("orders/<int:pk>", views.order_detail, name="order_detail"),
     path("orders/<int:pk>/cancel", views.order_cancel, name="order_cancel"),
     path("orders/<int:pk>/confirm-receipt", views.confirm_receipt, name="confirm_receipt"),
     path("staff/queue", staff_required(views.order_queue), name="order_queue"),
@@ -19,4 +19,6 @@ urlpatterns = [
     path("staff/orders/<int:pk>/pack", staff_required(views.start_packing), name="start_packing"),
     path("staff/orders/<int:pk>/dispatch", staff_required(views.dispatch_order), name="dispatch_order"),
     path("staff/orders/<int:pk>/deliver", staff_required(views.staff_confirm_delivery), name="staff_confirm_delivery"),
+    path("staff/pcs/<int:pk>/substitution", staff_required(views.propose_substitution), name="propose_substitution"),
+    path("substitutions/<int:pk>/decision", views.decide_substitution, name="decide_substitution"),
 ]
