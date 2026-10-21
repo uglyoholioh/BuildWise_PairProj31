@@ -8,7 +8,7 @@ from django.utils import timezone
 from accounts.models import Customer, Employee, StaffAction
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
-from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
 
 
 class OrderQueueTests(TestCase):
@@ -174,6 +174,93 @@ class OrderQueueTests(TestCase):
         self.assertEqual(shipment.confirmed_by, f"customer:{self.customer.user_id}")
         self.assertEqual(shipment.delivered_at, delivered_at)
         self.assertEqual(OrderStatusHistory.objects.filter(to_status="delivered").count(), 1)
+
+    def create_substitution(self):
+        order, pc = self.create_paid_build_pc()
+        replacement = Component.objects.create(
+            category=Component.Category.CPU,
+            brand="Example",
+            model="Replacement CPU",
+            socket="AM5",
+            price=Decimal("150.00"),
+        )
+        StockAdjustment.objects.create(
+            item_type="component", component=replacement, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_order", args=[pc.pk]))
+        response = self.client.post(
+            reverse("orders:propose_substitution", args=[pc.pk]),
+            {
+                "original_component": self.component.pk,
+                "replacement_component": replacement.pk,
+                "reason": "The original CPU is unavailable",
+                "spec_differences": "Higher boost clock",
+                "fps_note": "Estimated FPS is unchanged",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        return order, pc, replacement, SubstitutionProposal.objects.get()
+
+    def test_substitution_acceptance_rechecks_and_changes_only_allocations(self):
+        order, pc, replacement, proposal = self.create_substitution()
+        self.client.force_login(self.customer.user)
+
+        response = self.client.post(
+            reverse("orders:decide_substitution", args=[proposal.pk]),
+            {"decision": "accept"},
+        )
+
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        pc.refresh_from_db()
+        order.refresh_from_db()
+        proposal.refresh_from_db()
+        self.assertEqual(pc.status, "assembling")
+        self.assertEqual(order.total_snapshot, Decimal("100.00"))
+        self.assertEqual(proposal.status, "accepted")
+        self.assertEqual(proposal.decided_by, f"customer:{self.customer.user_id}")
+        self.assertEqual(
+            list(Reservation.objects.filter(purchased_pc=pc, status=Reservation.Status.RESERVED).values_list("component_id", flat=True)),
+            [replacement.pk],
+        )
+        self.assertEqual(
+            Reservation.objects.get(purchased_pc=pc, component=self.component).status,
+            Reservation.Status.RELEASED,
+        )
+
+    def test_unavailable_replacement_keeps_pc_on_hold_and_proposal_pending(self):
+        order, pc, replacement, proposal = self.create_substitution()
+        Reservation.objects.create(component=replacement, order_line=pc.order_line, quantity=2)
+        self.client.force_login(self.customer.user)
+
+        self.client.post(
+            reverse("orders:decide_substitution", args=[proposal.pk]),
+            {"decision": "accept"},
+        )
+
+        pc.refresh_from_db()
+        proposal.refresh_from_db()
+        self.assertEqual(pc.status, "on_hold")
+        self.assertEqual(proposal.status, "pending")
+        self.assertIn("no longer available", pc.hold_reason)
+
+    def test_declining_substitution_records_full_refund_and_preserves_started_parts_for_inspection(self):
+        order, pc, _, proposal = self.create_substitution()
+        self.client.force_login(self.customer.user)
+
+        self.client.post(
+            reverse("orders:decide_substitution", args=[proposal.pk]),
+            {"decision": "decline"},
+        )
+
+        pc.refresh_from_db()
+        proposal.refresh_from_db()
+        reservation = Reservation.objects.get(purchased_pc=pc, component=self.component)
+        self.assertEqual(pc.status, "cancelled")
+        self.assertEqual(pc.refund_amount, Decimal("100.00"))
+        self.assertEqual(reservation.status, Reservation.Status.RESERVED)
+        self.assertEqual(proposal.status, "declined")
+        self.assertTrue(proposal.decided_at)
 
     def test_unpaid_order_cannot_start(self):
         order, pc = self.create_paid_build_pc()
