@@ -6,15 +6,17 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Employee, StaffAction
+from inventory.availability import available_accessory_quantity
 from .compatibility import check_configuration_components, revalidate_configurations
 from .forms import (
+    AccessoryForm,
     AssemblyFeeForm,
     ComponentConflictForm,
     ComponentForm,
     ConfigurationForm,
     ConfigurationItemFormSet,
 )
-from .models import AssemblyFeeSetting, Component, ComponentConflict, Configuration
+from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration
 from .pricing import available_preset_quantity, calculate_pc_price
 
 
@@ -72,6 +74,60 @@ def component_update(request, pk):
         request,
         "catalogue/component_form.html",
         {"form": form, "title": f"Edit {component.brand} {component.model}"},
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def accessory_manage_list(request):
+    accessories = [
+        {"item": item, "available": available_accessory_quantity(item)}
+        for item in Accessory.objects.order_by("category", "name")
+    ]
+    return render(request, "catalogue/accessory_manage_list.html", {"accessories": accessories})
+
+
+@require_http_methods(["GET", "POST"])
+def accessory_create(request):
+    form = AccessoryForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            accessory = form.save()
+            StaffAction.objects.create(
+                employee=request.user.employee_profile,
+                action_type="accessory_created",
+                object_ref=str(accessory.pk),
+                detail=f"Created accessory {accessory.name} at ${accessory.price}.",
+            )
+        messages.success(request, "Accessory created.")
+        return redirect("catalogue:accessory_manage_list")
+    return render(request, "catalogue/accessory_form.html", {"form": form, "title": "Add accessory"})
+
+
+@require_http_methods(["GET", "POST"])
+def accessory_update(request, pk):
+    accessory = get_object_or_404(Accessory, pk=pk)
+    old_active = accessory.active
+    form = AccessoryForm(request.POST if request.method == "POST" else None, instance=accessory)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            accessory = form.save()
+            action_type = (
+                "accessory_deactivated" if old_active and not accessory.active
+                else "accessory_reactivated" if not old_active and accessory.active
+                else "accessory_updated"
+            )
+            StaffAction.objects.create(
+                employee=request.user.employee_profile,
+                action_type=action_type,
+                object_ref=str(accessory.pk),
+                detail=f"Updated accessory {accessory.name} at ${accessory.price}.",
+            )
+        messages.success(request, "Accessory updated.")
+        return redirect("catalogue:accessory_manage_list")
+    return render(
+        request,
+        "catalogue/accessory_form.html",
+        {"form": form, "title": f"Edit {accessory.name}"},
     )
 
 

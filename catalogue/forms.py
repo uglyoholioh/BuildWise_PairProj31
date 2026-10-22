@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from .compatibility import REQUIRED_SPECS
-from .models import Component, ComponentConflict, Configuration, ConfigurationItem
+from .models import Accessory, Component, ComponentConflict, Configuration, ConfigurationItem
 
 
 class ComponentForm(forms.ModelForm):
@@ -34,6 +34,22 @@ class ComponentForm(forms.ModelForm):
             if not cleaned_data.get(field):
                 self.add_error(field, "This specification is required for the selected category.")
         return cleaned_data
+
+
+class AccessoryForm(forms.ModelForm):
+    price = forms.DecimalField(min_value=Decimal("0.01"), max_digits=10, decimal_places=2)
+
+    class Meta:
+        model = Accessory
+        fields = ("name", "category", "price", "active")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "form-check-input" if isinstance(field.widget, forms.CheckboxInput)
+                else "form-control"
+            )
 
 
 class ComponentConflictForm(forms.ModelForm):

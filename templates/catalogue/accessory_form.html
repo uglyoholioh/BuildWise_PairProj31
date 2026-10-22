@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'catalogue:accessory_manage_list' %}">← Accessories</a></p>
+<h1 class="h3 mb-3">{{ title }}</h1>
+<form method="post" class="card card-body">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary align-self-start" type="submit">Save accessory</button></form>
+{% endblock %}

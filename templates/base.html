@@ -13,6 +13,7 @@
       {% if user.is_authenticated %}
       {% if user.is_active and user.employee_profile.active %}
       <a class="nav-link text-light ms-3" href="{% url 'catalogue:component_list' %}">Components</a>
+      <a class="nav-link text-light ms-2" href="{% url 'catalogue:accessory_manage_list' %}">Accessories</a>
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:compatibility_rules' %}">Compatibility</a>
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:preset_manage_list' %}">Presets</a>
       <a class="nav-link text-light ms-2" href="{% url 'inventory:inventory_dashboard' %}">Inventory</a>

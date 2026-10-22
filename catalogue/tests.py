@@ -5,9 +5,10 @@ from decimal import Decimal
 
 from accounts.models import Customer, Employee, StaffAction
 from inventory.models import Reservation, StockAdjustment
+from orders.models import Order, OrderLine
 from .compatibility import check_compatibility
 from .forms import ComponentForm
-from .models import AssemblyFeeSetting, Component, ComponentConflict, Configuration
+from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration
 from .pricing import available_preset_quantity, calculate_pc_price
 
 
@@ -275,4 +276,70 @@ class PresetManagementTests(TestCase):
         self.client.logout()
         self.client.login(username="employee", password="safe-pass-123")
         response = self.client.get(reverse("catalogue:assembly_fee"))
+        self.assertEqual(response.status_code, 302)
+
+
+class AccessoryManagementTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(username="staff", password="safe-pass-123")
+        self.employee = Employee.objects.create(user=user)
+        self.client.login(username="staff", password="safe-pass-123")
+
+    def accessory_data(self, **overrides):
+        return {"name": "Wireless mouse", "category": "peripheral", "price": "25.00", "active": "on", **overrides}
+
+    def test_staff_can_manage_accessory_and_deactivate_without_changing_old_order(self):
+        response = self.client.post(reverse("catalogue:accessory_create"), self.accessory_data())
+        self.assertRedirects(response, reverse("catalogue:accessory_manage_list"))
+        accessory = Accessory.objects.get()
+        customer_user = User.objects.create_user(username="buyer", password="safe-pass-123")
+        customer = Customer.objects.create(user=customer_user, name="Buyer", email="buyer@example.com")
+        order = Order.objects.create(
+            customer=customer,
+            total_snapshot=Decimal("25.00"),
+            delivery_name="Buyer",
+            delivery_address="1 Example Road",
+        )
+        line = OrderLine.objects.create(
+            order=order,
+            kind="accessory",
+            name=accessory.name,
+            quantity=1,
+            unit_price_snapshot=accessory.price,
+            accessory=accessory,
+        )
+
+        response = self.client.post(
+            reverse("catalogue:accessory_update", args=[accessory.pk]),
+            self.accessory_data(name="Wireless mouse v2", price="30.00", active=""),
+        )
+
+        self.assertRedirects(response, reverse("catalogue:accessory_manage_list"))
+        accessory.refresh_from_db()
+        line.refresh_from_db()
+        self.assertFalse(accessory.active)
+        self.assertEqual(line.accessory, accessory)
+        self.assertEqual(line.name, "Wireless mouse")
+        self.assertEqual(line.unit_price_snapshot, Decimal("25.00"))
+        self.assertEqual(
+            list(StaffAction.objects.values_list("action_type", flat=True)),
+            ["accessory_created", "accessory_deactivated"],
+        )
+
+    def test_accessory_price_must_be_positive(self):
+        response = self.client.post(
+            reverse("catalogue:accessory_create"), self.accessory_data(price="0")
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Accessory.objects.count(), 0)
+        self.assertContains(response, "Ensure this value is greater than or equal to 0.01")
+
+    def test_customer_cannot_manage_accessories(self):
+        self.client.logout()
+        user = User.objects.create_user(username="customer", password="safe-pass-123")
+        Customer.objects.create(user=user, name="Customer", email="customer@example.com")
+        self.client.login(username="customer", password="safe-pass-123")
+
+        response = self.client.get(reverse("catalogue:accessory_manage_list"))
+
         self.assertEqual(response.status_code, 302)
