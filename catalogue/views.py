@@ -291,14 +291,25 @@ def preset_detail(request, pk):
         from recommendations.models import GameSettingSupport
 
         questionnaire = customer.questionnaires.order_by("-created_at", "-pk").first()
-        if questionnaire:
-            for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
-                supported = GameSettingSupport.objects.filter(
-                    game=setting.game,
-                    resolution=setting.resolution,
-                    graphics_preset=setting.graphics_preset,
-                ).exists()
-                game_needs.append({"setting": setting, "supported": supported, "estimate": None})
+    else:
+        from recommendations.models import GameSettingSupport, QuestionnaireResponse
+
+    if not questionnaire and request.session.get("questionnaire_response_id"):
+        from recommendations.models import QuestionnaireResponse
+
+        saved_response = QuestionnaireResponse.objects.filter(
+            pk=request.session["questionnaire_response_id"]
+        ).first()
+        if saved_response and (saved_response.customer_id is None or saved_response.customer_id == getattr(customer, "pk", None)):
+            questionnaire = saved_response
+    if questionnaire:
+        for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+            supported = GameSettingSupport.objects.filter(
+                game=setting.game,
+                resolution=setting.resolution,
+                graphics_preset=setting.graphics_preset,
+            ).exists()
+            game_needs.append({"setting": setting, "supported": supported, "estimate": None})
     return render(
         request,
         "catalogue/preset_detail.html",
