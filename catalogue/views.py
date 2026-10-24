@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Employee, StaffAction
+from accounts.models import Customer
 from inventory.availability import available_accessory_quantity
 from .compatibility import check_configuration_components, revalidate_configurations
 from .forms import (
@@ -283,10 +284,31 @@ def preset_detail(request, pk):
         status=Configuration.Status.PUBLISHED,
     )
     presets, fee = _preset_rows([configuration])
+    customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    questionnaire = None
+    game_needs = []
+    if customer:
+        from recommendations.models import GameSettingSupport
+
+        questionnaire = customer.questionnaires.order_by("-created_at", "-pk").first()
+        if questionnaire:
+            for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+                supported = GameSettingSupport.objects.filter(
+                    game=setting.game,
+                    resolution=setting.resolution,
+                    graphics_preset=setting.graphics_preset,
+                ).exists()
+                game_needs.append({"setting": setting, "supported": supported, "estimate": None})
     return render(
         request,
         "catalogue/preset_detail.html",
-        {"row": presets[0], "assembly_fee": fee.fee_amount if fee else None, "has_fee": fee is not None},
+        {
+            "row": presets[0],
+            "assembly_fee": fee.fee_amount if fee else None,
+            "has_fee": fee is not None,
+            "questionnaire": questionnaire,
+            "game_needs": game_needs,
+        },
     )
 
 
