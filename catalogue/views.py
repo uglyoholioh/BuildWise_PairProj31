@@ -1,4 +1,5 @@
 from django.contrib import messages
+from decimal import Decimal, InvalidOperation
 from django.contrib.auth.decorators import user_passes_test
 from django.db import transaction
 from django.http import HttpResponse
@@ -188,12 +189,10 @@ def current_assembly_fee():
     return AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
 
 
-def preset_list(request):
+def _preset_rows(configurations):
     fee = current_assembly_fee()
     presets = []
-    for configuration in Configuration.objects.prefetch_related(
-        "items__component"
-    ).order_by("name"):
+    for configuration in configurations:
         items = list(configuration.items.all())
         issues = check_configuration_components(item.component for item in items)
         price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
@@ -206,6 +205,60 @@ def preset_list(request):
                 "issues": issues,
             }
         )
+    return presets, fee
+
+
+def preset_manage_list(request):
+    presets, fee = _preset_rows(
+        Configuration.objects.prefetch_related("items__component").order_by("name")
+    )
+    return render(
+        request,
+        "catalogue/preset_manage_list.html",
+        {
+            "presets": presets,
+            "assembly_fee": fee.fee_amount if fee else None,
+            "has_fee": fee is not None,
+        },
+    )
+
+
+def preset_list(request):
+    query = Configuration.objects.filter(
+        status=Configuration.Status.PUBLISHED
+    ).prefetch_related("items__component").order_by("name")
+    presets, fee = _preset_rows(query)
+    min_price = request.GET.get("min_price", "").strip()
+    max_price = request.GET.get("max_price", "").strip()
+    tier = request.GET.get("tier", "").strip()
+    availability = request.GET.get("availability", "all")
+    filter_error = ""
+    try:
+        minimum = Decimal(min_price) if min_price else None
+        maximum = Decimal(max_price) if max_price else None
+        if (minimum is not None and minimum < 0) or (maximum is not None and maximum < 0):
+            raise InvalidOperation
+    except InvalidOperation:
+        minimum = maximum = None
+        filter_error = "Enter valid non-negative price limits."
+    tiers = sorted({
+        item.component.ml_tier
+        for row in presets
+        for item in row["configuration"].items.all()
+        if item.component.ml_tier
+    })
+    if tier:
+        presets = [row for row in presets if any(
+            item.component.ml_tier == tier for item in row["configuration"].items.all()
+        )]
+    if availability == "in_stock":
+        presets = [row for row in presets if row["available_quantity"] > 0]
+    elif availability == "out_of_stock":
+        presets = [row for row in presets if row["available_quantity"] == 0]
+    if minimum is not None:
+        presets = [row for row in presets if row["price"] is not None and row["price"] >= minimum]
+    if maximum is not None:
+        presets = [row for row in presets if row["price"] is not None and row["price"] <= maximum]
     return render(
         request,
         "catalogue/preset_list.html",
@@ -213,7 +266,27 @@ def preset_list(request):
             "presets": presets,
             "assembly_fee": fee.fee_amount if fee else None,
             "has_fee": fee is not None,
+            "min_price": min_price,
+            "max_price": max_price,
+            "tier": tier,
+            "tiers": tiers,
+            "availability": availability,
+            "filter_error": filter_error,
         },
+    )
+
+
+def preset_detail(request, pk):
+    configuration = get_object_or_404(
+        Configuration.objects.prefetch_related("items__component"),
+        pk=pk,
+        status=Configuration.Status.PUBLISHED,
+    )
+    presets, fee = _preset_rows([configuration])
+    return render(
+        request,
+        "catalogue/preset_detail.html",
+        {"row": presets[0], "assembly_fee": fee.fee_amount if fee else None, "has_fee": fee is not None},
     )
 
 

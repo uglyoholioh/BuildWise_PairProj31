@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ row.configuration.name }} | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'catalogue:preset_list' %}">← PC presets</a></p>
+<h1 class="h3">{{ row.configuration.name }}</h1>{% if row.configuration.description %}<p class="text-body-secondary">{{ row.configuration.description }}</p>{% endif %}
+<p>{% if row.has_price %}<strong>PC price: ${{ row.price }}</strong> (includes ${{ assembly_fee }} assembly and testing){% else %}Price unavailable{% endif %}</p>
+<p>{% if row.available_quantity %}{{ row.available_quantity }} currently available{% else %}Out of stock; you can still customize this build.{% endif %}</p>
+<div class="table-responsive"><table class="table"><thead><tr><th>Component</th><th>Category</th><th>Quantity</th><th>Unit price</th></tr></thead><tbody>{% for item in row.configuration.items.all %}<tr><td>{{ item.component.brand }} {{ item.component.model }}</td><td>{{ item.component.get_category_display }}</td><td>{{ item.quantity }}</td><td>${{ item.component.price }}</td></tr>{% endfor %}</tbody></table></div>
+<a class="btn btn-primary" href="{% url 'catalogue:configure' %}?preset={{ row.configuration.pk }}">Customize this build</a>
+{% endblock %}

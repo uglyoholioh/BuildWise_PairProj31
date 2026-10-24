@@ -343,3 +343,75 @@ class AccessoryManagementTests(TestCase):
         response = self.client.get(reverse("catalogue:accessory_manage_list"))
 
         self.assertEqual(response.status_code, 302)
+
+
+class PresetBrowseTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(username="manager", password="safe-pass-123")
+        self.employee = Employee.objects.create(user=user, role=Employee.Role.MANAGER)
+        AssemblyFeeSetting.objects.create(fee_amount=Decimal("25.00"), updated_by=self.employee)
+
+    def create_build(self, name, gpu_tier="high", gpu_stock=1, status=Configuration.Status.PUBLISHED):
+        specs = {
+            Component.Category.CPU: {"socket": "AM5"},
+            Component.Category.MOTHERBOARD: {"socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"},
+            Component.Category.MEMORY: {"memory_type": "DDR5"},
+            Component.Category.GPU: {"ml_tier": gpu_tier},
+            Component.Category.STORAGE: {},
+            Component.Category.POWER_SUPPLY: {},
+            Component.Category.CASE: {"form_factor": "ATX"},
+        }
+        components = [
+            Component.objects.create(
+                category=category,
+                brand="Example",
+                model=f"{name} {category}",
+                price=Decimal("200.00") if category == Component.Category.GPU else Decimal("100.00"),
+                **fields,
+            )
+            for category, fields in specs.items()
+        ]
+        configuration = Configuration.objects.create(name=name, status=status)
+        configuration.components.add(*components)
+        for component in components:
+            quantity = gpu_stock if component.category == Component.Category.GPU else 2
+            if quantity:
+                StockAdjustment.objects.create(
+                    item_type="component", component=component, delta=quantity,
+                    reason="Opening stock", created_by=self.employee,
+                )
+        return configuration
+
+    def test_customer_sees_only_published_presets_and_can_open_out_of_stock(self):
+        self.create_build("Available Build")
+        unavailable = self.create_build("Out of Stock Build", gpu_stock=0)
+        self.create_build("Draft Build", status=Configuration.Status.DRAFT)
+        self.create_build("Withdrawn Build", status=Configuration.Status.WITHDRAWN)
+
+        response = self.client.get(reverse("catalogue:preset_list"))
+
+        self.assertContains(response, "Available Build")
+        self.assertContains(response, "Out of Stock Build")
+        self.assertNotContains(response, "Draft Build")
+        self.assertNotContains(response, "Withdrawn Build")
+        detail = self.client.get(reverse("catalogue:preset_detail", args=[unavailable.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Out of stock")
+        self.assertContains(detail, "Customize this build")
+        self.assertEqual(
+            self.client.get(reverse("catalogue:preset_detail", args=[self.create_build("Another Draft", status=Configuration.Status.DRAFT).pk])).status_code,
+            404,
+        )
+
+    def test_filters_apply_price_component_tier_and_stock_availability(self):
+        self.create_build("High Tier", gpu_tier="high", gpu_stock=1)
+        self.create_build("Low Tier", gpu_tier="low", gpu_stock=0)
+        url = reverse("catalogue:preset_list")
+
+        response = self.client.get(url, {"tier": "high", "availability": "in_stock", "min_price": "800", "max_price": "850"})
+
+        self.assertContains(response, "High Tier")
+        self.assertNotContains(response, "Low Tier")
+        response = self.client.get(url, {"availability": "out_of_stock"})
+        self.assertContains(response, "Low Tier")
+        self.assertNotContains(response, "High Tier")
