@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Compare builds | BuildWise{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap gap-3 mb-3"><div><h1 class="h3 mb-1">Compare builds</h1><p class="text-body-secondary mb-0">Compare up to three builds side by side.</p></div><a class="btn btn-outline-primary align-self-start" href="{% url 'catalogue:preset_list' %}">Browse presets</a></div>
+{% if builds %}<div class="table-responsive"><table class="table table-bordered align-middle"><thead><tr><th scope="col">Comparison</th>{% for build in builds %}<th scope="col"><div>{{ build.name }}</div><form method="post" action="{% url 'recommendations:compare_remove' %}">{% csrf_token %}<input type="hidden" name="kind" value="{{ build.kind }}"><input type="hidden" name="item_id" value="{{ build.id }}"><button class="btn btn-link btn-sm p-0" type="submit">Remove</button></form></th>{% endfor %}</tr></thead><tbody>
+{% for row in overview_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}
+{% for row in category_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}
+{% for build in builds %}{% if build.issues %}<tr><th scope="row">Validation · {{ build.name }}</th><td colspan="{{ builds|length }}"><span class="text-danger">{{ build.issues|join:" " }}</span></td></tr>{% endif %}{% endfor %}
+{% if questionnaire %}{% for row in game_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{% if value == "Unavailable" %}<span class="text-body-secondary">Unavailable</span>{% else %}{{ value }}{% endif %}</td>{% endfor %}</tr>{% endfor %}<tr><td colspan="{{ builds|length|add:1 }}" class="small text-body-secondary">FPS values are estimates; the current predictor is temporary.</td></tr>{% else %}<tr><th scope="row">Predicted performance</th><td colspan="{{ builds|length }}">No gaming needs recorded. <a href="{% url 'recommendations:questionnaire' %}">Complete the questionnaire</a> to compare supported FPS estimates.</td></tr>{% endif %}
+</tbody></table></div>{% else %}<div class="alert alert-info">No builds selected. Add presets from their detail pages or recommendation results.</div>{% endif %}
+{% endblock %}

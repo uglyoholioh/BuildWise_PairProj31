@@ -303,13 +303,15 @@ def preset_detail(request, pk):
         if saved_response and (saved_response.customer_id is None or saved_response.customer_id == getattr(customer, "pk", None)):
             questionnaire = saved_response
     if questionnaire:
+        from recommendations.predictor import predict_temporary_fps
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(
                 game=setting.game,
                 resolution=setting.resolution,
                 graphics_preset=setting.graphics_preset,
             ).exists()
-            game_needs.append({"setting": setting, "supported": supported, "estimate": None})
+            estimate = predict_temporary_fps(list(configuration.items.all()), setting) if supported else None
+            game_needs.append({"setting": setting, "supported": supported, "estimate": estimate})
     return render(
         request,
         "catalogue/preset_detail.html",

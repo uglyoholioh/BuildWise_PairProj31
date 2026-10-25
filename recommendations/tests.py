@@ -53,7 +53,7 @@ class PresetGamingDetailTests(TestCase):
         self.assertContains(page, "60 FPS")
         self.assertContains(page, "Unavailable for these settings")
 
-    def test_supported_inputs_show_estimate_unavailable_until_predictor_exists(self):
+    def test_supported_inputs_show_temporary_estimate(self):
         user = User.objects.create_user(username="buyer", password="safe-pass-123")
         customer = Customer.objects.create(user=user, name="Buyer", email="buyer@example.com")
         response = QuestionnaireResponse.objects.create(
@@ -69,11 +69,19 @@ class PresetGamingDetailTests(TestCase):
         GameSettingSupport.objects.create(
             game=self.game, resolution="1920x1080", graphics_preset="high"
         )
+        gpu = Component.objects.create(
+            category=Component.Category.GPU,
+            brand="Example",
+            model="GPU",
+            ml_tier="high",
+            price=Decimal("200.00"),
+        )
+        ConfigurationItem.objects.create(configuration=self.configuration, component=gpu, quantity=1)
         self.client.force_login(user)
 
         page = self.client.get(reverse("catalogue:preset_detail", args=[self.configuration.pk]))
 
-        self.assertContains(page, "Estimate unavailable")
+        self.assertContains(page, "76 FPS (estimate)")
 
 
 class QuestionnaireTests(TestCase):

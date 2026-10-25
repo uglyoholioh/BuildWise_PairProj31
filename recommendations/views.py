@@ -3,13 +3,16 @@ from decimal import Decimal
 from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from accounts.models import Customer
+from catalogue.models import AssemblyFeeSetting, Component, Configuration
 from catalogue.compatibility import check_configuration_components
-from catalogue.models import AssemblyFeeSetting, Configuration
 from catalogue.pricing import available_preset_quantity, calculate_pc_price
 from .forms import QuestionnaireForm
-from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse
+from catalogue.models import ConfigurationItem
+from inventory.availability import available_component_quantity
+from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
 from .predictor import predict_temporary_fps
 
 
@@ -170,3 +173,166 @@ def recommendations(request):
             "temporary_estimates": True,
         },
     )
+
+
+@require_POST
+def compare_add(request):
+    kind = request.POST.get("kind", "preset")
+    try:
+        item_id = int(request.POST.get("item_id", ""))
+    except ValueError:
+        messages.error(request, "Choose a valid build to compare.")
+        return redirect("recommendations:compare")
+    if kind == "preset":
+        exists = Configuration.objects.filter(pk=item_id, status=Configuration.Status.PUBLISHED).exists()
+    elif kind == "shortlist" and request.user.is_authenticated:
+        exists = ShortlistItem.objects.filter(pk=item_id, customer__user=request.user).exists()
+    elif kind == "custom":
+        exists = any(str(item.get("id")) == str(item_id) for item in request.session.get("completed_builds", []))
+    else:
+        exists = False
+    if not exists:
+        messages.error(request, "That build is unavailable to compare.")
+    else:
+        selected = request.session.get("comparison_items", [])
+        item = {"kind": kind, "id": item_id}
+        if item not in selected:
+            if len(selected) >= 3:
+                messages.error(request, "Compare up to three builds at a time.")
+            else:
+                selected.append(item)
+                request.session["comparison_items"] = selected
+                messages.success(request, "Build added to comparison.")
+    return redirect("recommendations:compare")
+
+
+@require_POST
+def compare_remove(request):
+    key = {"kind": request.POST.get("kind"), "id": request.POST.get("item_id")}
+    selected = request.session.get("comparison_items", [])
+    request.session["comparison_items"] = [
+        item for item in selected if not (item.get("kind") == key["kind"] and str(item.get("id")) == key["id"])
+    ]
+    return redirect("recommendations:compare")
+
+
+def compare_builds(request):
+    selected = request.session.get("comparison_items", [])[:3]
+    builds = []
+    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    for selection in selected:
+        kind, item_id = selection.get("kind"), selection.get("id")
+        if kind == "preset":
+            configuration = Configuration.objects.filter(
+                pk=item_id, status=Configuration.Status.PUBLISHED
+            ).prefetch_related("items__component").first()
+            if not configuration:
+                continue
+            items = list(configuration.items.all())
+            name = configuration.name
+        elif kind == "shortlist" and request.user.is_authenticated:
+            saved = ShortlistItem.objects.filter(
+                pk=item_id, customer__user=request.user
+            ).select_related("configuration").first()
+            if not saved:
+                continue
+            name = saved.name
+            if saved.configuration_id:
+                configuration = saved.configuration
+                items = list(configuration.items.select_related("component"))
+            else:
+                items = _snapshot_items(saved.custom_snapshot)
+        elif kind == "custom":
+            saved = next((item for item in request.session.get("completed_builds", []) if str(item.get("id")) == str(item_id)), None)
+            if not saved:
+                continue
+            name = saved.get("name", "Custom build")
+            items = _snapshot_items(saved)
+        else:
+            continue
+        issues = check_configuration_components(item.component for item in items)
+        price = None
+        if fee:
+            price = calculate_pc_price(items, fee.fee_amount)
+        available = min(
+            (available_component_quantity(item.component) // item.quantity for item in items),
+            default=0,
+        ) if items else 0
+        by_category = {}
+        for item in items:
+            label = item.component.get_category_display()
+            component = item.component
+            specs = [
+                f"Socket {component.socket}" if component.socket else "",
+                f"Memory {component.memory_type}" if component.memory_type else "",
+                f"Form factor {component.form_factor}" if component.form_factor else "",
+                f"Tier {component.ml_tier}" if component.ml_tier else "",
+            ]
+            specs.extend(f"{key}: {value}" for key, value in component.specs.items())
+            specs = [value for value in specs if value]
+            part = f"{component.brand} {component.model} × {item.quantity}"
+            if specs:
+                part += f" ({'; '.join(specs)})"
+            by_category[label] = f"{by_category[label]}; {part}" if label in by_category else part
+        questionnaire = _previous_response(request, _customer(request))
+        estimates = []
+        if questionnaire:
+            for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+                supported = GameSettingSupport.objects.filter(
+                    game=setting.game, resolution=setting.resolution,
+                    graphics_preset=setting.graphics_preset,
+                ).exists()
+                fps = predict_temporary_fps(items, setting) if supported and not issues else None
+                estimates.append({"setting": setting, "fps": fps})
+        builds.append({
+            "kind": kind,
+            "id": item_id,
+            "name": name,
+            "price": price,
+            "available": available,
+            "issues": issues,
+            "by_category": by_category,
+            "estimates": estimates,
+        })
+    category_rows = []
+    categories = ("CPU", "Motherboard", "Memory", "Graphics card", "Storage", "Power supply", "Case", "CPU cooler")
+    for category in categories:
+        category_rows.append({"label": category, "values": [build["by_category"].get(category, "—") for build in builds]})
+    overview_rows = [
+        {"label": "PC price", "values": [f"${build['price']}" if build["price"] is not None else "Unavailable" for build in builds]},
+        {"label": "Available now", "values": [str(build["available"]) for build in builds]},
+    ]
+    questionnaire = _previous_response(request, _customer(request))
+    game_rows = []
+    if questionnaire:
+        for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+            game_rows.append({
+                "label": f"{setting.game.name} · {setting.resolution} · {setting.graphics_preset} · target {setting.fps_goal} FPS (estimate)",
+                "values": [
+                    next((str(row["fps"]) + " FPS" if row["fps"] is not None else "Unavailable" for row in build["estimates"] if row["setting"].pk == setting.pk), "Unavailable")
+                    for build in builds
+                ],
+            })
+    return render(
+        request,
+        "recommendations/compare.html",
+        {
+            "builds": builds,
+            "overview_rows": overview_rows,
+            "category_rows": category_rows,
+            "game_rows": game_rows,
+            "questionnaire": questionnaire,
+        },
+    )
+
+
+def _snapshot_items(snapshot):
+    component_rows = snapshot.get("components", [])
+    components = Component.objects.in_bulk(
+        row.get("component_id") for row in component_rows if row.get("component_id")
+    )
+    return [
+        ConfigurationItem(component=components[row["component_id"]], quantity=row.get("quantity", 1))
+        for row in component_rows
+        if row.get("component_id") in components and row.get("quantity", 0) > 0
+    ]
