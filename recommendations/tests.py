@@ -4,8 +4,9 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from accounts.models import Customer
-from catalogue.models import Component, Configuration, ConfigurationItem
+from accounts.models import Customer, Employee
+from catalogue.models import AssemblyFeeSetting, Component, Configuration, ConfigurationItem
+from inventory.models import StockAdjustment
 from .forms import QuestionnaireForm
 from .models import Game, GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse
 
@@ -145,3 +146,94 @@ class QuestionnaireTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("no more than three games", str(form.errors).lower())
+
+
+class RecommendationProfileTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(username="manager", password="safe-pass-123")
+        self.employee = Employee.objects.create(user=user, role=Employee.Role.MANAGER)
+        AssemblyFeeSetting.objects.create(fee_amount=Decimal("25.00"), updated_by=self.employee)
+        self.game = Game.objects.create(name="Example Game", slug="example-game")
+        GameSettingSupport.objects.create(
+            game=self.game, resolution="1920x1080", graphics_preset="high"
+        )
+
+    def save_needs(self, budget, target=60):
+        response = QuestionnaireResponse.objects.create(
+            perf_level="balanced", max_spend=Decimal(str(budget))
+        )
+        QuestionnaireGameSetting.objects.create(
+            response=response,
+            game=self.game,
+            fps_goal=target,
+            resolution="1920x1080",
+            graphics_preset="high",
+        )
+        session = self.client.session
+        session["questionnaire_response_id"] = response.pk
+        session.save()
+        return response
+
+    def create_build(self, name, tier, gpu_price=Decimal("200.00")):
+        specs = {
+            Component.Category.CPU: {"socket": "AM5"},
+            Component.Category.MOTHERBOARD: {"socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"},
+            Component.Category.MEMORY: {"memory_type": "DDR5"},
+            Component.Category.GPU: {"ml_tier": tier},
+            Component.Category.STORAGE: {},
+            Component.Category.POWER_SUPPLY: {},
+            Component.Category.CASE: {"form_factor": "ATX"},
+        }
+        config = Configuration.objects.create(name=name, status=Configuration.Status.PUBLISHED)
+        for category, fields in specs.items():
+            component = Component.objects.create(
+                category=category,
+                brand="Example",
+                model=f"{name} {category}",
+                price=gpu_price if category == Component.Category.GPU else Decimal("100.00"),
+                **fields,
+            )
+            ConfigurationItem.objects.create(configuration=config, component=component, quantity=1)
+            StockAdjustment.objects.create(
+                item_type="component", component=component, delta=2,
+                reason="Opening stock", created_by=self.employee,
+            )
+        return config
+
+    def test_within_budget_profiles_are_ranked_and_same_build_labels_are_combined(self):
+        self.save_needs("1000.00")
+        build = self.create_build("High Build", "high")
+        self.create_build("Unsupported Tier", "unlisted")
+
+        response = self.client.get(reverse("recommendations:recommendations"))
+
+        self.assertContains(response, "Lowest cost meeting all goals")
+        self.assertContains(response, "Best performance within budget")
+        self.assertContains(response, "Best value")
+        self.assertContains(response, "High Build")
+        self.assertEqual(len(response.context["profiles"]), 1)
+        self.assertEqual(response.context["profiles"][0]["row"]["configuration"], build)
+        self.assertEqual(len(response.context["profiles"][0]["labels"]), 3)
+
+    def test_alternatives_show_shortfalls_and_cheapest_qualifying_build_extra_cost(self):
+        self.save_needs("750.00")
+        affordable = self.create_build("Affordable Build", "medium", gpu_price=Decimal("100.00"))
+        qualifying = self.create_build("Qualifying Build", "high", gpu_price=Decimal("200.00"))
+
+        response = self.client.get(reverse("recommendations:recommendations"))
+
+        self.assertContains(response, "Affordable alternatives")
+        self.assertContains(response, "short by 9 FPS")
+        self.assertContains(response, affordable.name)
+        self.assertContains(response, qualifying.name)
+        self.assertEqual(response.context["over_budget"]["configuration"], qualifying)
+        self.assertEqual(response.context["extra_cost"], Decimal("75.00"))
+
+    def test_no_supported_available_compatible_results_explains_next_step(self):
+        self.save_needs("1000.00")
+        self.create_build("Unknown Tier Build", "tier-not-mapped")
+
+        response = self.client.get(reverse("recommendations:recommendations"))
+
+        self.assertContains(response, "No available, compatible published build")
+        self.assertContains(response, "Revise gaming needs")

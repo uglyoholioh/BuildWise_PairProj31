@@ -1,12 +1,16 @@
+from decimal import Decimal
+
 from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import redirect, render
-from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
 
 from accounts.models import Customer
+from catalogue.compatibility import check_configuration_components
+from catalogue.models import AssemblyFeeSetting, Configuration
+from catalogue.pricing import available_preset_quantity, calculate_pc_price
 from .forms import QuestionnaireForm
-from .models import QuestionnaireGameSetting, QuestionnaireResponse
+from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse
+from .predictor import predict_temporary_fps
 
 
 def placeholder(request, *args, **kwargs):
@@ -68,4 +72,101 @@ def questionnaire(request):
         request,
         "recommendations/questionnaire.html",
         {"form": form, "game_settings": form.game_settings},
+    )
+
+
+def recommendations(request):
+    questionnaire = _previous_response(request, _customer(request))
+    if not questionnaire or not questionnaire.game_settings.exists():
+        return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False})
+    settings = list(questionnaire.game_settings.select_related("game").order_by("game__name"))
+    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    if fee is None:
+        return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False, "no_fee": True})
+
+    eligible = []
+    unsupported_count = 0
+    configurations = Configuration.objects.filter(status=Configuration.Status.PUBLISHED).prefetch_related(
+        "items__component"
+    ).order_by("name")
+    for configuration in configurations:
+        items = list(configuration.items.all())
+        if check_configuration_components(item.component for item in items):
+            continue
+        available = available_preset_quantity(items)
+        if available < 1:
+            continue
+        estimates = []
+        for setting in settings:
+            supported = GameSettingSupport.objects.filter(
+                game=setting.game,
+                resolution=setting.resolution,
+                graphics_preset=setting.graphics_preset,
+            ).exists()
+            fps = predict_temporary_fps(items, setting) if supported else None
+            if fps is None:
+                break
+            estimates.append({"setting": setting, "fps": fps, "shortfall": max(0, setting.fps_goal - fps)})
+        if len(estimates) != len(settings):
+            unsupported_count += 1
+            continue
+        price = calculate_pc_price(items, fee.fee_amount)
+        performance = sum(estimate["fps"] for estimate in estimates)
+        eligible.append({
+            "configuration": configuration,
+            "price": price,
+            "available": available,
+            "estimates": estimates,
+            "performance": performance,
+            "value": Decimal(performance) / price,
+            "meets_goals": all(estimate["shortfall"] == 0 for estimate in estimates),
+        })
+
+    affordable = [row for row in eligible if row["price"] <= questionnaire.max_spend]
+    qualifying = [row for row in eligible if row["meets_goals"]]
+    profiles = []
+    alternatives = []
+    over_budget = None
+    if any(row["meets_goals"] for row in affordable):
+        choices = [
+            ("Lowest cost meeting all goals", min((row for row in affordable if row["meets_goals"]), key=lambda row: row["price"]), "Lowest-priced available build that meets every target."),
+            ("Best performance within budget", min(affordable, key=lambda row: (-row["performance"], row["price"])), "Highest combined estimated FPS within your budget."),
+            ("Best value", min(affordable, key=lambda row: (-row["value"], row["price"])), "Highest combined estimated FPS per dollar within your budget."),
+        ]
+        for label, row, reason in choices:
+            existing = next((profile for profile in profiles if profile["row"] is row), None)
+            if existing:
+                existing["labels"].append(label)
+                existing["reasons"].append(reason)
+            else:
+                profiles.append({"row": row, "labels": [label], "reasons": [reason]})
+    elif affordable:
+        alternatives = sorted(
+            affordable,
+            key=lambda row: (sum(item["shortfall"] for item in row["estimates"]), row["price"]),
+        )[:3]
+        over_budget = min(
+            (row for row in qualifying if row["price"] > questionnaire.max_spend),
+            key=lambda row: row["price"],
+            default=None,
+        )
+    else:
+        over_budget = min(
+            (row for row in qualifying if row["price"] > questionnaire.max_spend),
+            key=lambda row: row["price"],
+            default=None,
+        )
+    return render(
+        request,
+        "recommendations/results.html",
+        {
+            "questionnaire": questionnaire,
+            "eligible": bool(eligible),
+            "profiles": profiles,
+            "alternatives": alternatives,
+            "over_budget": over_budget,
+            "extra_cost": over_budget["price"] - questionnaire.max_spend if over_budget else None,
+            "unsupported_count": unsupported_count,
+            "temporary_estimates": True,
+        },
     )
