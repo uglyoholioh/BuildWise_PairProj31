@@ -81,6 +81,21 @@ class ComponentManagementTests(TestCase):
         self.assertEqual(StaffAction.objects.count(), 2)
         self.assertEqual(StaffAction.objects.latest("acted_at").action_type, "component_deactivated")
 
+
+class CustomerConfiguratorTests(TestCase):
+    def test_guest_build_selections_persist_in_session(self):
+        cpu = Component.objects.create(
+            category=Component.Category.CPU, brand="Example", model="CPU", socket="AM5", price="100.00"
+        )
+
+        response = self.client.post(reverse("catalogue:configure"), {"component_cpu": str(cpu.pk), "name": "First build"})
+
+        self.assertRedirects(response, reverse("catalogue:configure"))
+        self.assertEqual(self.client.session["current_build"]["name"], "First build")
+        page = self.client.get(reverse("catalogue:configure"))
+        self.assertContains(page, "Example CPU")
+        self.assertContains(page, "Configuration is missing required categories")
+
     def test_customer_cannot_access_staff_catalogue(self):
         self.client.logout()
         user = User.objects.create_user(username="customer", password="safe-pass-123")

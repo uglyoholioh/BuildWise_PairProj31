@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 from accounts.models import Employee, StaffAction
 from accounts.models import Customer
 from inventory.availability import available_accessory_quantity
-from .compatibility import check_configuration_components, revalidate_configurations
+from .compatibility import check_compatibility, check_configuration_components, revalidate_configurations
 from .forms import (
     AccessoryForm,
     AssemblyFeeForm,
@@ -18,12 +18,92 @@ from .forms import (
     ConfigurationForm,
     ConfigurationItemFormSet,
 )
-from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration
+from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration, ConfigurationItem
 from .pricing import available_preset_quantity, calculate_pc_price
+from inventory.availability import available_component_quantity
 
 
 def placeholder(request, *args, **kwargs):
     return HttpResponse("Page under construction")
+
+
+@require_http_methods(["GET", "POST"])
+def configure(request):
+    from recommendations.models import GameSettingSupport
+    from recommendations.predictor import predict_temporary_fps
+
+    session_build = request.session.get("current_build", {})
+    preset_id = request.GET.get("preset") if request.method == "GET" else None
+    if preset_id:
+        preset = get_object_or_404(Configuration, pk=preset_id, status=Configuration.Status.PUBLISHED)
+        session_build = {
+            "name": preset.name,
+            "preset_id": preset.pk,
+            "components": [
+                {"component_id": item.component_id, "quantity": item.quantity}
+                for item in preset.items.all()
+            ],
+        }
+    selected_ids = {row["component_id"]: row["quantity"] for row in session_build.get("components", [])}
+    if request.method == "POST":
+        selected_ids = {}
+        for category, label in Component.Category.choices:
+            raw_id = request.POST.get(f"component_{category}", "").strip()
+            if raw_id:
+                try:
+                    component = Component.objects.get(pk=int(raw_id), category=category, active=True)
+                except (ValueError, Component.DoesNotExist):
+                    messages.error(request, f"Select an active {label.lower()}.")
+                    return redirect("catalogue:configure")
+                selected_ids[component.pk] = 1
+        session_build = {
+            "name": request.POST.get("name", "My custom PC").strip()[:160] or "My custom PC",
+            "preset_id": request.POST.get("preset_id") or None,
+            "components": [{"component_id": pk, "quantity": quantity} for pk, quantity in selected_ids.items()],
+        }
+    components = Component.objects.filter(pk__in=selected_ids, active=True)
+    component_map = {component.pk: component for component in components}
+    items = [ConfigurationItem(component=component_map[pk], quantity=quantity) for pk, quantity in selected_ids.items() if pk in component_map]
+    issues = check_configuration_components(item.component for item in items)
+    fee = current_assembly_fee()
+    price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
+    rows = []
+    for category, label in Component.Category.choices:
+        choices = list(Component.objects.filter(category=category, active=True).order_by("brand", "model"))
+        other_components = [item.component for item in items if item.component.category != category]
+        choices.sort(key=lambda component: bool(check_compatibility([*other_components, component])))
+        rows.append({
+            "category": category,
+            "label": label,
+            "choices": [{"component": component, "issues": check_compatibility([*other_components, component])} for component in choices],
+            "selected": next((pk for pk in selected_ids if component_map.get(pk) and component_map[pk].category == category), ""),
+        })
+    questionnaire = None
+    from recommendations.views import _customer, _previous_response
+    questionnaire = _previous_response(request, _customer(request))
+    estimates = []
+    if questionnaire and not issues:
+        for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+            supported = GameSettingSupport.objects.filter(game=setting.game, resolution=setting.resolution, graphics_preset=setting.graphics_preset).exists()
+            estimates.append({"setting": setting, "fps": predict_temporary_fps(items, setting) if supported else None})
+    if request.method == "POST":
+        request.session["current_build"] = session_build
+        if request.POST.get("action") == "complete" and not issues and available > 0:
+            import uuid
+            completed = request.session.get("completed_builds", [])
+            build_id = uuid.uuid4().hex
+            completed.append({"id": build_id, "name": session_build["name"], "components": session_build["components"]})
+            request.session["completed_builds"] = completed
+            messages.success(request, "Build saved for comparison.")
+            return redirect("catalogue:configure")
+        return redirect("catalogue:configure")
+    return render(request, "catalogue/configure.html", {
+        "name": session_build.get("name", "My custom PC"), "preset_id": session_build.get("preset_id"),
+        "rows": rows, "items": items, "issues": issues, "price": price, "fee": fee,
+        "available": available, "estimates": estimates, "complete": not issues,
+        "completed_builds": request.session.get("completed_builds", []),
+    })
 
 
 def component_list(request):

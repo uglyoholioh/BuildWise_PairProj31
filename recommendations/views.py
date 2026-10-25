@@ -178,8 +178,9 @@ def recommendations(request):
 @require_POST
 def compare_add(request):
     kind = request.POST.get("kind", "preset")
+    raw_id = request.POST.get("item_id", "")
     try:
-        item_id = int(request.POST.get("item_id", ""))
+        item_id = raw_id if kind == "custom" else int(raw_id)
     except ValueError:
         messages.error(request, "Choose a valid build to compare.")
         return redirect("recommendations:compare")
