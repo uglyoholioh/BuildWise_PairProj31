@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Checkout | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3">Review your order</h1>
+<ul>{% for row in lines %}<li>{{ row.line.name }} × {{ row.line.quantity }} — {% if row.price != None %}${{ row.price }} each{% else %}Unavailable{% endif %}{% if row.changed %}<span class="text-warning-emphasis"> (price review required)</span>{% endif %}{% for issue in row.issues %}<div class="text-danger">{{ issue }}</div>{% endfor %}</li>{% endfor %}</ul>
+<p class="h5">Total: ${{ total }}</p>
+<form method="post" class="card card-body">{% csrf_token %}
+  {% for field in form %}<div class="mb-3">{% if field.name == 'confirm_prices' %}<div class="form-check">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>{% else %}<label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% endif %}{% for error in field.errors %}<div class="text-danger">{{ error }}</div>{% endfor %}</div>{% endfor %}
+  {% if invalid %}<div class="alert alert-danger">Resolve the unavailable or incompatible build before checkout.</div>{% else %}<p class="small text-body-secondary">Payment is simulated for this project. No card or payment credentials are collected.</p><button class="btn btn-primary align-self-start" type="submit">Place order</button>{% endif %}
+</form>
+{% endblock %}

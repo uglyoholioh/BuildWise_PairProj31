@@ -1,7 +1,22 @@
 from django import forms
 
 from catalogue.models import Component
+from accounts.models import Customer
 from inventory.models import Reservation
+
+
+class CheckoutForm(forms.ModelForm):
+    confirm_prices = forms.BooleanField(required=False, label="I have reviewed the current prices")
+
+    class Meta:
+        model = Customer
+        fields = ("name", "delivery_address")
+        widgets = {"delivery_address": forms.Textarea(attrs={"rows": 3})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
 
 
 class HoldPCForm(forms.Form):

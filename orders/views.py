@@ -7,17 +7,224 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import StaffAction
-from catalogue.compatibility import check_compatibility
-from catalogue.models import Component
+from accounts.models import Customer
+from catalogue.compatibility import check_compatibility, check_configuration_components
+from catalogue.models import AssemblyFeeSetting, Component, Configuration, ConfigurationItem
+from catalogue.pricing import calculate_pc_price
 from inventory.availability import available_component_quantity
 from inventory.models import Reservation, StockAdjustment
 from .allocations import accessory_allocation_issues, purchased_pc_allocation_issues
-from .forms import DispatchForm, HoldPCForm, QualityCheckForm, SubstitutionProposalForm
-from .models import Order, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
+from .forms import CheckoutForm, DispatchForm, HoldPCForm, QualityCheckForm, SubstitutionProposalForm
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
 
 
 def placeholder(request, *args, **kwargs):
     return HttpResponse("Page under construction")
+
+
+def _build_snapshot(items):
+    return {"components": [{
+        "component_id": item.component_id,
+        "quantity": item.quantity,
+        "category": item.component.category,
+        "brand": item.component.brand,
+        "model": item.component.model,
+        "price": str(item.component.price),
+        "socket": item.component.socket,
+        "memory_type": item.component.memory_type,
+        "form_factor": item.component.form_factor,
+        "ml_tier": item.component.ml_tier,
+        "specs": item.component.specs,
+    } for item in items]}
+
+
+def _cart_build(row):
+    if row.get("kind") == "preset":
+        configuration = Configuration.objects.filter(
+            pk=row.get("configuration_id"), status=Configuration.Status.PUBLISHED
+        ).prefetch_related("items__component").first()
+        if not configuration:
+            return None, [], ["This preset is no longer available."]
+        items = list(configuration.items.all())
+        name = configuration.name
+    else:
+        snapshot = row.get("custom_snapshot", {})
+        ids = [part.get("component_id") for part in snapshot.get("components", [])]
+        components = Component.objects.in_bulk(ids)
+        items = [
+            ConfigurationItem(component=components[part["component_id"]], quantity=part["quantity"])
+            for part in snapshot.get("components", [])
+            if part.get("component_id") in components and part.get("quantity", 0) > 0
+        ]
+        configuration = None
+        name = row.get("name", "Custom PC")
+    issues = check_configuration_components(item.component for item in items)
+    return configuration, items, issues
+
+
+@require_http_methods(["GET", "POST"])
+def cart(request):
+    lines = request.session.get("cart", [])
+    if request.method == "POST":
+        line_id = request.POST.get("line_id")
+        action = request.POST.get("action")
+        for line in lines:
+            if str(line.get("id")) != line_id:
+                continue
+            if action == "remove":
+                lines.remove(line)
+            elif action == "update":
+                try:
+                    quantity = int(request.POST.get("quantity", ""))
+                except ValueError:
+                    quantity = 0
+                if 1 <= quantity <= 20:
+                    line["quantity"] = quantity
+                else:
+                    messages.error(request, "Quantity must be between 1 and 20.")
+            break
+        request.session["cart"] = lines
+        return redirect("orders:cart")
+    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    display_lines = []
+    total = 0
+    for line in lines:
+        configuration, items, issues = _cart_build(line)
+        price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+        quantity = line.get("quantity", 1)
+        old_price = line.get("quoted_price")
+        changed = price is not None and old_price is not None and str(price) != str(old_price)
+        line["price_changed"] = line.get("price_changed", False) or changed
+        line["quoted_price"] = str(price) if price is not None else None
+        stock = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
+        display_lines.append({"line": line, "items": items, "issues": issues, "price": price, "changed": changed, "stock": stock})
+        if price is not None:
+            total += price * quantity
+    request.session["cart"] = lines
+    return render(request, "orders/cart.html", {"lines": display_lines, "total": total, "has_cart": bool(lines)})
+
+
+@require_POST
+def cart_add(request):
+    kind = request.POST.get("kind")
+    if kind == "preset":
+        configuration = get_object_or_404(
+            Configuration.objects.prefetch_related("items__component"),
+            pk=request.POST.get("item_id"), status=Configuration.Status.PUBLISHED,
+        )
+        items = list(configuration.items.all())
+        name = configuration.name
+        configuration_id = configuration.pk
+    elif kind == "custom":
+        build = request.session.get("current_build", {})
+        ids = [part.get("component_id") for part in build.get("components", [])]
+        components = Component.objects.in_bulk(ids)
+        items = [ConfigurationItem(component=components[part["component_id"]], quantity=part["quantity"]) for part in build.get("components", []) if part.get("component_id") in components]
+        name, configuration_id = build.get("name", "Custom PC"), None
+    else:
+        messages.error(request, "Choose a valid build to add to the cart.")
+        return redirect("orders:cart")
+    issues = check_configuration_components(item.component for item in items)
+    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0)
+    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    if issues or not items or not available or not fee:
+        messages.error(request, "This build is incomplete, unavailable, incompatible, or missing a PC assembly fee.")
+        return redirect("orders:cart")
+    quantity = 1
+    snapshot = _build_snapshot(items)
+    key = f"preset:{configuration_id}" if configuration_id else "custom:" + ",".join(
+        f"{part['component_id']}x{part['quantity']}" for part in sorted(snapshot["components"], key=lambda value: value["component_id"])
+    )
+    lines = request.session.get("cart", [])
+    existing = next((line for line in lines if line.get("key") == key), None)
+    if existing:
+        existing["quantity"] = min(20, existing.get("quantity", 1) + quantity)
+    else:
+        import uuid
+        lines.append({"id": uuid.uuid4().hex, "key": key, "kind": kind, "configuration_id": configuration_id, "name": name, "custom_snapshot": snapshot, "quantity": quantity})
+    request.session["cart"] = lines
+    messages.success(request, f"{name} added to your cart.")
+    return redirect("orders:cart")
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def checkout(request):
+    customer = get_object_or_404(Customer, user=request.user)
+    lines = request.session.get("cart", [])
+    if not lines:
+        messages.error(request, "Your cart is empty.")
+        return redirect("orders:cart")
+    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    form = CheckoutForm(request.POST or None, instance=customer)
+    preview = []
+    total = 0
+    for line in lines:
+        configuration, items, issues = _cart_build(line)
+        price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+        if price is not None:
+            total += price * line.get("quantity", 1)
+        price_changed = price is not None and line.get("quoted_price") not in (None, str(price))
+        line["price_changed"] = line.get("price_changed", False) or price_changed
+        preview.append({"line": line, "items": items, "issues": issues, "price": price, "changed": price_changed or line["price_changed"]})
+    invalid = not fee or any(row["issues"] or row["price"] is None for row in preview)
+    if request.method == "POST" and form.is_valid() and not invalid:
+        if any(row["changed"] for row in preview) and not form.cleaned_data["confirm_prices"]:
+            for row in preview:
+                if row["price"] is not None:
+                    row["line"]["quoted_price"] = str(row["price"])
+                    row["line"]["price_changed"] = True
+            request.session["cart"] = lines
+            messages.warning(request, "Prices changed. Review the updated total and confirm before placing your order.")
+            return redirect("orders:cart")
+        try:
+            with transaction.atomic():
+                component_ids = sorted({item.component_id for row in preview for item in row["items"]})
+                locked = {item.pk: item for item in Component.objects.select_for_update().filter(pk__in=component_ids, active=True)}
+                if len(locked) != len(component_ids):
+                    raise ValueError("A component in your cart is no longer available.")
+                requirements = {}
+                for row in preview:
+                    if row["issues"]:
+                        raise ValueError("A build in your cart is no longer compatible.")
+                    for item in row["items"]:
+                        item.component = locked[item.component_id]
+                        requirements[item.component_id] = requirements.get(item.component_id, 0) + item.quantity * row["line"].get("quantity", 1)
+                    current_issues = check_configuration_components(item.component for item in row["items"])
+                    current_price = calculate_pc_price(row["items"], fee.fee_amount)
+                    if current_issues:
+                        raise ValueError("A build in your cart is no longer compatible.")
+                    if str(current_price) != str(row["price"]):
+                        row["line"]["quoted_price"] = str(current_price)
+                        row["line"]["price_changed"] = True
+                        request.session["cart"] = lines
+                        raise ValueError("Prices changed during checkout. Review the updated cart and confirm again.")
+                    row["price"] = current_price
+                total = sum(row["price"] * row["line"].get("quantity", 1) for row in preview)
+                for component_id, quantity in requirements.items():
+                    if available_component_quantity(locked[component_id]) < quantity:
+                        raise ValueError(f"Not enough stock for {locked[component_id]}.")
+                customer.name = form.cleaned_data["name"]
+                customer.delivery_address = form.cleaned_data["delivery_address"]
+                customer.save(update_fields=("name", "delivery_address"))
+                order = Order.objects.create(customer=customer, payment_status="paid", total_snapshot=total, delivery_name=customer.name, delivery_address=customer.delivery_address)
+                OrderStatusHistory.objects.create(order=order, to_status="placed", note="Simulated payment succeeded and stock was reserved.")
+                for row in preview:
+                    line = row["line"]
+                    configuration, items, _ = _cart_build(line)
+                    order_line = OrderLine.objects.create(order=order, kind="build", name=line["name"], quantity=line.get("quantity", 1), unit_price_snapshot=row["price"], configuration=configuration, custom_snapshot=_build_snapshot(items))
+                    for unit_index in range(1, order_line.quantity + 1):
+                        pc = PurchasedPC.objects.create(order_line=order_line, unit_index=unit_index)
+                        for item in items:
+                            Reservation.objects.create(component=locked[item.component_id], purchased_pc=pc, quantity=item.quantity)
+        except ValueError as error:
+            messages.error(request, str(error))
+            return redirect("orders:cart")
+        request.session["cart"] = []
+        request.session.pop("current_build", None)
+        messages.success(request, "Payment simulated successfully. Your order has been placed.")
+        return redirect("orders:order_detail", pk=order.pk)
+    return render(request, "orders/checkout.html", {"form": form, "lines": preview, "total": total, "invalid": invalid})
 
 
 @login_required

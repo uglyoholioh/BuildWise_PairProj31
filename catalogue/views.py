@@ -98,6 +98,7 @@ def configure(request):
             messages.success(request, "Build saved for comparison.")
             return redirect("catalogue:configure")
         return redirect("catalogue:configure")
+    request.session["current_build"] = session_build
     return render(request, "catalogue/configure.html", {
         "name": session_build.get("name", "My custom PC"), "preset_id": session_build.get("preset_id"),
         "rows": rows, "items": items, "issues": issues, "price": price, "fee": fee,
