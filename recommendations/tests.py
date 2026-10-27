@@ -245,3 +245,24 @@ class RecommendationProfileTests(TestCase):
 
         self.assertContains(response, "No available, compatible published build")
         self.assertContains(response, "Revise gaming needs")
+
+
+class BuildComparisonTests(TestCase):
+    def test_incomplete_build_does_not_show_a_partial_price_as_pc_price(self):
+        user = User.objects.create_user(username="manager", password="safe-pass-123")
+        employee = Employee.objects.create(user=user, role=Employee.Role.MANAGER)
+        AssemblyFeeSetting.objects.create(fee_amount=Decimal("25.00"), updated_by=employee)
+        cpu = Component.objects.create(
+            category=Component.Category.CPU, brand="Example", model="CPU", socket="AM5", price="100.00"
+        )
+        configuration = Configuration.objects.create(
+            name="Incomplete build", status=Configuration.Status.PUBLISHED
+        )
+        ConfigurationItem.objects.create(configuration=configuration, component=cpu)
+        session = self.client.session
+        session["comparison_items"] = [{"kind": "preset", "id": configuration.pk}]
+        session.save()
+
+        response = self.client.get(reverse("recommendations:compare"))
+
+        self.assertEqual(response.context["overview_rows"][0]["values"], ["Unavailable"])

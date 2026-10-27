@@ -253,7 +253,7 @@ def compare_builds(request):
             continue
         issues = check_configuration_components(item.component for item in items)
         price = None
-        if fee:
+        if fee and not issues:
             price = calculate_pc_price(items, fee.fee_amount)
         available = min(
             (available_component_quantity(item.component) // item.quantity for item in items),

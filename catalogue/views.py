@@ -2,6 +2,7 @@ from django.contrib import messages
 from decimal import Decimal, InvalidOperation
 from django.contrib.auth.decorators import user_passes_test
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
@@ -167,6 +168,23 @@ def accessory_manage_list(request):
         for item in Accessory.objects.order_by("category", "name")
     ]
     return render(request, "catalogue/accessory_manage_list.html", {"accessories": accessories})
+
+
+def accessory_list(request):
+    accessories = Accessory.objects.filter(active=True).order_by("category", "name")
+    query = request.GET.get("q", "").strip()
+    category = request.GET.get("category", "")
+    if query:
+        accessories = accessories.filter(Q(name__icontains=query) | Q(category__icontains=query))
+    if category:
+        accessories = accessories.filter(category=category)
+    categories = Accessory.objects.filter(active=True).order_by().values_list("category", flat=True).distinct()
+    return render(request, "catalogue/accessory_list.html", {
+        "accessories": [{"item": item, "available": available_accessory_quantity(item)} for item in accessories],
+        "categories": categories,
+        "query": query,
+        "selected_category": category,
+    })
 
 
 @require_http_methods(["GET", "POST"])

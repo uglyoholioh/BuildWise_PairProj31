@@ -22,5 +22,5 @@ urlpatterns = [
     path("staff/assembly-fee", staff_required(views.assembly_fee), name="assembly_fee"),
     path("presets/<int:pk>", views.preset_detail, name="preset_detail"),
     path("configure", views.configure, name="configure"),
-    path("accessories", views.placeholder, name="accessory_list"),
+    path("accessories", views.accessory_list, name="accessory_list"),
 ]

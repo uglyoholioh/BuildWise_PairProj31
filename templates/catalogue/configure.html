@@ -13,7 +13,7 @@
     <label class="form-label" for="component-{{ row.category }}">{{ row.label }}</label>
     <select class="form-select" id="component-{{ row.category }}" name="component_{{ row.category }}">
       <option value="">Choose {{ row.label|lower }}</option>
-      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if choice.issues %} (compatibility issue){% endif %}</option>{% endfor %}
+      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if choice.issues %} ({{ choice.issues|join:"; " }}){% endif %}</option>{% endfor %}
     </select>
   </div>
   {% endfor %}

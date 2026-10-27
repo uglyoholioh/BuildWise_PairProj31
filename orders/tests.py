@@ -66,6 +66,51 @@ class CheckoutTests(TestCase):
         self.assertEqual(Order.objects.count(), 0)
         self.assertEqual(len(self.client.session["cart"]), 1)
 
+    def test_pc_and_accessory_share_checkout_and_reserve_accessory_stock(self):
+        accessory = Accessory.objects.create(name="Wireless mouse", category="Mouse", price="40.00")
+        StockAdjustment.objects.create(
+            item_type="accessory", accessory=accessory, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("orders:checkout"), {
+            "name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on",
+        })
+
+        order = Order.objects.get()
+        accessory_line = order.lines.get(kind="accessory")
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        self.assertEqual(order.total_snapshot, Decimal("765.00"))
+        self.assertEqual(accessory_line.accessory, accessory)
+        self.assertEqual(accessory_line.reservations.get().quantity, 1)
+        self.assertEqual(PurchasedPC.objects.filter(order_line__order=order).count(), 1)
+
+    def test_accessory_only_checkout_creates_a_packable_order_line(self):
+        accessory = Accessory.objects.create(name="Keyboard", category="Keyboard", price="60.00")
+        StockAdjustment.objects.create(
+            item_type="accessory", accessory=accessory, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("orders:checkout"), {
+            "name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on",
+        })
+
+        order = Order.objects.get()
+        line = order.lines.get()
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        self.assertEqual(order.total_snapshot, Decimal("60.00"))
+        self.assertEqual(line.kind, "accessory")
+        self.assertEqual(line.reservations.get().accessory, accessory)
+        self.assertFalse(PurchasedPC.objects.filter(order_line__order=order).exists())
+
 
 class OrderQueueTests(TestCase):
     def setUp(self):

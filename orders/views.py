@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -10,9 +10,9 @@ from django.views.decorators.http import require_http_methods, require_POST
 from accounts.models import StaffAction
 from accounts.models import Customer
 from catalogue.compatibility import check_compatibility, check_configuration_components
-from catalogue.models import AssemblyFeeSetting, Component, Configuration, ConfigurationItem
+from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
 from catalogue.pricing import calculate_pc_price
-from inventory.availability import available_component_quantity
+from inventory.availability import available_accessory_quantity, available_component_quantity
 from inventory.models import Reservation, StockAdjustment
 from .allocations import accessory_allocation_issues, purchased_pc_allocation_issues
 from .forms import CheckoutForm, DispatchForm, HoldPCForm, QualityCheckForm, SubstitutionProposalForm
@@ -90,15 +90,22 @@ def cart(request):
     display_lines = []
     total = 0
     for line in lines:
-        configuration, items, issues = _cart_build(line)
-        price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+        accessory = None
+        if line.get("kind") == "accessory":
+            accessory = Accessory.objects.filter(pk=line.get("accessory_id"), active=True).first()
+            items, issues = [], [] if accessory else ["This accessory is no longer available."]
+            price = accessory.price if accessory else None
+            stock = available_accessory_quantity(accessory) if accessory else 0
+        else:
+            configuration, items, issues = _cart_build(line)
+            price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+            stock = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
         quantity = line.get("quantity", 1)
         old_price = line.get("quoted_price")
         changed = price is not None and old_price is not None and str(price) != str(old_price)
         line["price_changed"] = line.get("price_changed", False) or changed
         line["quoted_price"] = str(price) if price is not None else None
-        stock = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
-        display_lines.append({"line": line, "items": items, "issues": issues, "price": price, "changed": changed, "stock": stock})
+        display_lines.append({"line": line, "items": items, "accessory": accessory, "issues": issues, "price": price, "changed": changed, "stock": stock})
         if price is not None:
             total += price * quantity
     request.session["cart"] = lines
@@ -122,6 +129,21 @@ def cart_add(request):
         components = Component.objects.in_bulk(ids)
         items = [ConfigurationItem(component=components[part["component_id"]], quantity=part["quantity"]) for part in build.get("components", []) if part.get("component_id") in components]
         name, configuration_id = build.get("name", "Custom PC"), None
+    elif kind == "accessory":
+        accessory = get_object_or_404(Accessory, pk=request.POST.get("item_id"), active=True)
+        if not available_accessory_quantity(accessory):
+            messages.error(request, "This accessory is out of stock.")
+            return redirect("catalogue:accessory_list")
+        lines = request.session.get("cart", [])
+        existing = next((line for line in lines if line.get("kind") == "accessory" and line.get("accessory_id") == accessory.pk), None)
+        if existing:
+            existing["quantity"] = min(20, existing.get("quantity", 1) + 1)
+        else:
+            import uuid
+            lines.append({"id": uuid.uuid4().hex, "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk, "name": accessory.name, "quantity": 1})
+        request.session["cart"] = lines
+        messages.success(request, f"{accessory.name} added to your cart.")
+        return redirect("orders:cart")
     else:
         messages.error(request, "Choose a valid build to add to the cart.")
         return redirect("orders:cart")
@@ -161,14 +183,20 @@ def checkout(request):
     preview = []
     total = 0
     for line in lines:
-        configuration, items, issues = _cart_build(line)
-        price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
+        accessory = None
+        if line.get("kind") == "accessory":
+            accessory = Accessory.objects.filter(pk=line.get("accessory_id"), active=True).first()
+            items, issues = [], [] if accessory else ["An accessory in your cart is no longer available."]
+            price = accessory.price if accessory else None
+        else:
+            configuration, items, issues = _cart_build(line)
+            price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
         if price is not None:
             total += price * line.get("quantity", 1)
         price_changed = price is not None and line.get("quoted_price") not in (None, str(price))
         line["price_changed"] = line.get("price_changed", False) or price_changed
-        preview.append({"line": line, "items": items, "issues": issues, "price": price, "changed": price_changed or line["price_changed"]})
-    invalid = not fee or any(row["issues"] or row["price"] is None for row in preview)
+        preview.append({"line": line, "items": items, "accessory": accessory, "configuration": configuration if line.get("kind") != "accessory" else None, "issues": issues, "price": price, "changed": price_changed or line["price_changed"]})
+    invalid = any(row["issues"] or row["price"] is None or (row["line"].get("kind") != "accessory" and not fee) for row in preview)
     if request.method == "POST" and form.is_valid() and not invalid:
         if any(row["changed"] for row in preview) and not form.cleaned_data["confirm_prices"]:
             for row in preview:
@@ -184,17 +212,28 @@ def checkout(request):
                 locked = {item.pk: item for item in Component.objects.select_for_update().filter(pk__in=component_ids, active=True)}
                 if len(locked) != len(component_ids):
                     raise ValueError("A component in your cart is no longer available.")
-                requirements = {}
+                accessory_ids = sorted({row["accessory"].pk for row in preview if row["accessory"]})
+                locked_accessories = {item.pk: item for item in Accessory.objects.select_for_update().filter(pk__in=accessory_ids, active=True)}
+                if len(locked_accessories) != len(accessory_ids):
+                    raise ValueError("An accessory in your cart is no longer available.")
+                requirements = {"component": {}, "accessory": {}}
                 for row in preview:
                     if row["issues"]:
-                        raise ValueError("A build in your cart is no longer compatible.")
-                    for item in row["items"]:
-                        item.component = locked[item.component_id]
-                        requirements[item.component_id] = requirements.get(item.component_id, 0) + item.quantity * row["line"].get("quantity", 1)
-                    current_issues = check_configuration_components(item.component for item in row["items"])
-                    current_price = calculate_pc_price(row["items"], fee.fee_amount)
-                    if current_issues:
-                        raise ValueError("A build in your cart is no longer compatible.")
+                        raise ValueError("An item in your cart is no longer available or compatible.")
+                    line = row["line"]
+                    if line.get("kind") == "accessory":
+                        accessory = locked_accessories[row["accessory"].pk]
+                        current_price = accessory.price
+                        requirements["accessory"][accessory.pk] = requirements["accessory"].get(accessory.pk, 0) + line.get("quantity", 1)
+                        row["accessory"] = accessory
+                    else:
+                        for item in row["items"]:
+                            item.component = locked[item.component_id]
+                            requirements["component"][item.component_id] = requirements["component"].get(item.component_id, 0) + item.quantity * line.get("quantity", 1)
+                        current_issues = check_configuration_components(item.component for item in row["items"])
+                        if current_issues:
+                            raise ValueError("A build in your cart is no longer compatible.")
+                        current_price = calculate_pc_price(row["items"], fee.fee_amount)
                     if str(current_price) != str(row["price"]):
                         row["line"]["quoted_price"] = str(current_price)
                         row["line"]["price_changed"] = True
@@ -202,9 +241,12 @@ def checkout(request):
                         raise ValueError("Prices changed during checkout. Review the updated cart and confirm again.")
                     row["price"] = current_price
                 total = sum(row["price"] * row["line"].get("quantity", 1) for row in preview)
-                for component_id, quantity in requirements.items():
+                for component_id, quantity in requirements["component"].items():
                     if available_component_quantity(locked[component_id]) < quantity:
                         raise ValueError(f"Not enough stock for {locked[component_id]}.")
+                for accessory_id, quantity in requirements["accessory"].items():
+                    if available_accessory_quantity(locked_accessories[accessory_id]) < quantity:
+                        raise ValueError(f"Not enough stock for {locked_accessories[accessory_id]}.")
                 customer.name = form.cleaned_data["name"]
                 customer.delivery_address = form.cleaned_data["delivery_address"]
                 customer.save(update_fields=("name", "delivery_address"))
@@ -212,12 +254,17 @@ def checkout(request):
                 OrderStatusHistory.objects.create(order=order, to_status="placed", note="Simulated payment succeeded and stock was reserved.")
                 for row in preview:
                     line = row["line"]
-                    configuration, items, _ = _cart_build(line)
-                    order_line = OrderLine.objects.create(order=order, kind="build", name=line["name"], quantity=line.get("quantity", 1), unit_price_snapshot=row["price"], configuration=configuration, custom_snapshot=_build_snapshot(items))
-                    for unit_index in range(1, order_line.quantity + 1):
-                        pc = PurchasedPC.objects.create(order_line=order_line, unit_index=unit_index)
-                        for item in items:
-                            Reservation.objects.create(component=locked[item.component_id], purchased_pc=pc, quantity=item.quantity)
+                    order_line = OrderLine.objects.create(order=order, kind=line["kind"] if line.get("kind") == "accessory" else "build", name=line["name"], quantity=line.get("quantity", 1), unit_price_snapshot=row["price"], configuration=row.get("configuration"), accessory=row.get("accessory"), custom_snapshot=_build_snapshot(row["items"]) if line.get("kind") != "accessory" else {})
+                    if line.get("kind") == "accessory":
+                        Reservation.objects.create(accessory=row["accessory"], order_line=order_line, quantity=order_line.quantity)
+                    else:
+                        for unit_index in range(1, order_line.quantity + 1):
+                            pc = PurchasedPC.objects.create(order_line=order_line, unit_index=unit_index)
+                            for item in row["items"]:
+                                Reservation.objects.create(component=locked[item.component_id], purchased_pc=pc, quantity=item.quantity)
+        except OperationalError:
+            messages.error(request, "Inventory is being updated. Your cart is unchanged; please try checkout again.")
+            return redirect("orders:cart")
         except ValueError as error:
             messages.error(request, str(error))
             return redirect("orders:cart")

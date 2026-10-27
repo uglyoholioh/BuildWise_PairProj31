@@ -96,6 +96,24 @@ class CustomerConfiguratorTests(TestCase):
         self.assertContains(page, "Example CPU")
         self.assertContains(page, "Configuration is missing required categories")
 
+    def test_conflicting_component_option_shows_the_reason(self):
+        cpu = Component.objects.create(
+            category=Component.Category.CPU, brand="Example", model="CPU", socket="AM5", price="100.00"
+        )
+        gpu = Component.objects.create(
+            category=Component.Category.GPU, brand="Example", model="GPU", ml_tier="high", price="200.00"
+        )
+        ComponentConflict.objects.create(component_a=cpu, component_b=gpu, reason="Known clearance issue")
+        session = self.client.session
+        session["current_build"] = {
+            "name": "Test build", "components": [{"component_id": cpu.pk, "quantity": 1}]
+        }
+        session.save()
+
+        response = self.client.get(reverse("catalogue:configure"))
+
+        self.assertContains(response, "(CPU Example CPU and Graphics card Example GPU are marked incompatible: Known clearance issue)")
+
     def test_customer_cannot_access_staff_catalogue(self):
         self.client.logout()
         user = User.objects.create_user(username="customer", password="safe-pass-123")
@@ -430,3 +448,21 @@ class PresetBrowseTests(TestCase):
         response = self.client.get(url, {"availability": "out_of_stock"})
         self.assertContains(response, "Low Tier")
         self.assertNotContains(response, "High Tier")
+
+
+class AccessoryBrowseTests(TestCase):
+    def test_active_accessories_can_be_searched_and_filtered_with_stock(self):
+        user = User.objects.create_user(username="manager", password="safe-pass-123")
+        employee = Employee.objects.create(user=user, role=Employee.Role.MANAGER)
+        mouse = Accessory.objects.create(name="Wireless mouse", category="Mouse", price="25.00")
+        Accessory.objects.create(name="Mechanical keyboard", category="Keyboard", price="60.00")
+        StockAdjustment.objects.create(
+            item_type="accessory", accessory=mouse, delta=3,
+            reason="Opening stock", created_by=employee,
+        )
+
+        response = self.client.get(reverse("catalogue:accessory_list"), {"q": "wireless", "category": "Mouse"})
+
+        self.assertContains(response, "Wireless mouse")
+        self.assertContains(response, "3 available")
+        self.assertNotContains(response, "Mechanical keyboard")
