@@ -336,11 +336,14 @@ class OrderQueueTests(TestCase):
 
         order.refresh_from_db()
         self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.payment_status, "refunded")
         self.assertEqual(OrderStatusHistory.objects.get().to_status, "cancelled")
+        reservation = Reservation.objects.get(purchased_pc=pc)
+        self.assertEqual(reservation.status, Reservation.Status.RELEASED)
         self.client.force_login(self.employee.user)
         self.client.post(reverse("orders:start_order", args=[pc.pk]))
         pc.refresh_from_db()
-        self.assertEqual(pc.status, "queued")
+        self.assertEqual(pc.status, "cancelled")
 
     def test_customer_cannot_cancel_after_assembly_starts(self):
         order, pc = self.create_paid_build_pc()
@@ -351,6 +354,20 @@ class OrderQueueTests(TestCase):
 
         order.refresh_from_db()
         self.assertEqual(order.status, "in_progress")
+
+    def test_customer_order_list_shows_only_their_orders_and_tracking(self):
+        order, _ = self.create_accessory_order(status="dispatched")
+        Shipment.objects.create(order=order, status="dispatched", courier="Courier Co", tracking_ref="TRACK-1")
+        other_user = User.objects.create_user(username="other", password="safe-pass-123")
+        Customer.objects.create(user=other_user, name="Other", email="other@example.com")
+        other_order = Order.objects.create(customer=Customer.objects.get(user=other_user), total_snapshot=Decimal("1.00"), delivery_name="Other", delivery_address="Elsewhere")
+        self.client.force_login(self.customer.user)
+
+        response = self.client.get(reverse("orders:order_list"))
+
+        self.assertContains(response, f"Order #{order.pk}")
+        self.assertContains(response, "TRACK-1")
+        self.assertNotContains(response, f"Order #{other_order.pk}")
 
     def test_passing_all_quality_checks_consumes_allocations_once(self):
         order, pc = self.create_paid_build_pc()

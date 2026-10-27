@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -235,12 +236,19 @@ def order_detail(request, pk):
             "lines__pcs__substitutions",
             "lines__pcs__substitutions__original_component",
             "lines__pcs__substitutions__replacement_component",
+            "lines__pcs__quality_checks__employee",
             "status_history",
         ),
         pk=pk,
         customer__user=request.user,
     )
     return render(request, "orders/order_detail.html", {"order": order})
+
+
+@login_required
+def order_list(request):
+    orders = Order.objects.filter(customer__user=request.user).select_related("shipment").prefetch_related("status_history").order_by("-placed_at", "-pk")
+    return render(request, "orders/order_list.html", {"orders": orders})
 
 
 @require_http_methods(["GET", "POST"])
@@ -467,16 +475,28 @@ def order_cancel(request, pk):
         order = get_object_or_404(
             Order.objects.select_for_update(), pk=pk, customer__user=request.user
         )
-        if order.status != "placed":
+        if order.status != "placed" or order.payment_status != "paid":
             messages.error(request, "This order can no longer be cancelled.")
         else:
+            reservations = Reservation.objects.select_for_update().filter(
+                Q(order_line__order=order) | Q(purchased_pc__order_line__order=order),
+                status=Reservation.Status.RESERVED,
+            )
+            for reservation in reservations:
+                reservation.status = Reservation.Status.RELEASED
+                reservation.save(update_fields=("status",))
+            for pc in PurchasedPC.objects.select_for_update().filter(order_line__order=order):
+                pc.status = "cancelled"
+                pc.refund_amount = pc.order_line.unit_price_snapshot
+                pc.save(update_fields=("status", "refund_amount"))
             order.status = "cancelled"
-            order.save(update_fields=("status",))
+            order.payment_status = "refunded"
+            order.save(update_fields=("status", "payment_status"))
             OrderStatusHistory.objects.create(
                 order=order,
                 from_status="placed",
                 to_status="cancelled",
-                note="Customer cancelled before assembly started.",
+                note=f"Customer cancelled before assembly or packing started; simulated refund of ${order.total_snapshot} recorded and reservations released.",
             )
             messages.success(request, "Your order has been cancelled.")
     return redirect("orders:order_list")

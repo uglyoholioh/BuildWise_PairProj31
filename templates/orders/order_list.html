@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}My orders | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3">My orders</h1>
+{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
+{% for order in orders %}<article class="card mb-3"><div class="card-body"><div class="d-flex justify-content-between gap-3"><h2 class="h5">Order #{{ order.pk }}</h2><span class="badge text-bg-secondary">{{ order.status }}</span></div><p class="mb-1">Placed {{ order.placed_at }} · Payment {{ order.payment_status }} · ${{ order.total_snapshot }}</p>{% if order.shipment %}<p class="mb-1">Shipment {{ order.shipment.status }}{% if order.shipment.courier %} · {{ order.shipment.courier }}{% endif %}{% if order.shipment.tracking_ref %} · Tracking {{ order.shipment.tracking_ref }}{% endif %}{% if order.shipment.delivered_at %} · Delivered {{ order.shipment.delivered_at }} ({{ order.shipment.confirmed_by }}){% endif %}</p>{% endif %}<a href="{% url 'orders:order_detail' order.pk %}">View order progress</a><ul class="mt-2">{% for event in order.status_history.all %}<li>{{ event.created_at }} · {{ event.to_status }}{% if event.note %} · {{ event.note }}{% endif %}</li>{% endfor %}</ul></div></article>{% empty %}<div class="alert alert-info">No orders yet. <a href="{% url 'catalogue:preset_list' %}">Browse PC presets</a>.</div>{% endfor %}
+{% endblock %}
