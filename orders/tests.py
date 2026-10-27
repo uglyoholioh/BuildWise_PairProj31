@@ -6,9 +6,65 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Customer, Employee, StaffAction
-from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
+from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
+
+
+class CheckoutTests(TestCase):
+    def setUp(self):
+        staff_user = User.objects.create_user(username="manager", password="safe-pass-123")
+        self.employee = Employee.objects.create(user=staff_user, role=Employee.Role.MANAGER)
+        AssemblyFeeSetting.objects.create(fee_amount=Decimal("25.00"), updated_by=self.employee)
+        self.user = User.objects.create_user(username="buyer", password="safe-pass-123")
+        Customer.objects.create(user=self.user, name="Buyer", email="buyer@example.com", delivery_address="1 Old Road")
+        specs = {
+            Component.Category.CPU: {"socket": "AM5"},
+            Component.Category.MOTHERBOARD: {"socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"},
+            Component.Category.MEMORY: {"memory_type": "DDR5"},
+            Component.Category.GPU: {"ml_tier": "high"},
+            Component.Category.STORAGE: {},
+            Component.Category.POWER_SUPPLY: {},
+            Component.Category.CASE: {"form_factor": "ATX"},
+        }
+        self.configuration = Configuration.objects.create(name="Checkout PC", status=Configuration.Status.PUBLISHED)
+        for category, fields in specs.items():
+            component = Component.objects.create(category=category, brand="Example", model=category, price="100.00", **fields)
+            ConfigurationItem.objects.create(configuration=self.configuration, component=component, quantity=1)
+            StockAdjustment.objects.create(item_type="component", component=component, delta=3, reason="Opening stock", created_by=self.employee)
+
+    def test_preset_checkout_creates_paid_order_pc_snapshots_and_reservations(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        cart_line = self.client.session["cart"][0]
+        self.client.post(reverse("orders:cart"), {"line_id": cart_line["id"], "action": "update", "quantity": "2"})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
+
+        order = Order.objects.get()
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(order.total_snapshot, Decimal("1450.00"))
+        self.assertEqual(PurchasedPC.objects.filter(order_line__order=order).count(), 2)
+        self.assertEqual(Reservation.objects.filter(purchased_pc__order_line__order=order, status=Reservation.Status.RESERVED).count(), 14)
+        self.assertEqual(order.lines.get().custom_snapshot["components"][0]["price"], "100.00")
+        self.assertEqual(self.client.session["cart"], [])
+
+    def test_insufficient_combined_stock_keeps_cart_and_creates_no_order(self):
+        for component in Component.objects.all():
+            StockAdjustment.objects.create(item_type="component", component=component, delta=-2, reason="Reduce stock", created_by=self.employee)
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        cart_line = self.client.session["cart"][0]
+        self.client.post(reverse("orders:cart"), {"line_id": cart_line["id"], "action": "update", "quantity": "2"})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
+
+        self.assertRedirects(response, reverse("orders:cart"))
+        self.assertEqual(Order.objects.count(), 0)
+        self.assertEqual(len(self.client.session["cart"]), 1)
 
 
 class OrderQueueTests(TestCase):
