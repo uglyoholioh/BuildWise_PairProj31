@@ -113,3 +113,18 @@ class SupportConversationTests(TestCase):
             self.client.get(reverse("support:request_detail", args=[support_request.pk])).status_code,
             404,
         )
+
+    def test_customer_can_reply_while_open_but_not_after_staff_closes(self):
+        support_request = SupportRequest.objects.create(customer=self.customer, order=self.order)
+        self.client.force_login(self.customer.user)
+
+        response = self.client.post(reverse("support:request_detail", args=[support_request.pk]), {"body": "I can provide more details."})
+
+        self.assertRedirects(response, reverse("support:request_detail", args=[support_request.pk]))
+        self.assertTrue(support_request.messages.filter(sender_type="customer", body="I can provide more details.").exists())
+        support_request.status = "closed"
+        support_request.resolution_note = "Resolved"
+        support_request.save(update_fields=("status", "resolution_note"))
+        self.assertNotContains(self.client.get(reverse("support:request_detail", args=[support_request.pk])), "Send a message")
+        self.client.post(reverse("support:request_detail", args=[support_request.pk]), {"body": "A late reply"})
+        self.assertFalse(support_request.messages.filter(body="A late reply").exists())
