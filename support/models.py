@@ -21,6 +21,7 @@ class SupportRequest(models.Model):
 class SupportMessage(models.Model):
     request = models.ForeignKey(SupportRequest, on_delete=models.CASCADE, related_name="messages")
     sender_type = models.CharField(max_length=16, choices=[("customer", "Customer"), ("employee", "Employee")])
+    employee = models.ForeignKey("accounts.Employee", null=True, blank=True, on_delete=models.PROTECT)
     is_staff_only = models.BooleanField(default=False)
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)

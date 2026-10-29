@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} | BuildWise{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'catalogue:component_list' %}" class="link-secondary">← Component catalogue</a>
+  <h1 class="h3 mt-2">{{ title }}</h1>
+</div>
+
+<div class="card"><div class="card-body">
+  <form method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+      {% for field in form %}
+        <div class="{% if field.name == 'description' or field.name == 'specs' %}col-12{% else %}col-md-6{% endif %}">
+          {% if field.field.widget.input_type == "checkbox" %}
+            <div class="form-check">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
+          {% else %}
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+          {% endif %}
+          {% for error in field.errors %}<div class="text-danger small" role="alert">{{ error }}</div>{% endfor %}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary mt-3" type="submit">Save component</button>
+  </form>
+</div></div>
+{% endblock %}

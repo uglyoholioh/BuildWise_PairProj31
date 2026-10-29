@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Record stock adjustment | BuildWise{% endblock %}
+
+{% block content %}
+<div class="mb-4"><a href="{% url 'inventory:inventory_dashboard' %}" class="link-secondary">← Inventory</a><h1 class="h3 mt-2">Record stock adjustment</h1></div>
+
+<div class="card"><div class="card-body">
+  <form method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <p class="text-body-secondary">Choose one item type and select the matching item. Negative changes cannot use reserved stock.</p>
+    <div class="row g-3">
+      {% for field in form %}
+        <div class="col-md-6">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}<div class="text-danger small" role="alert">{{ error }}</div>{% endfor %}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary mt-3" type="submit">Save adjustment</button>
+  </form>
+</div></div>
+{% endblock %}

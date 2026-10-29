@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Staff order queue | BuildWise{% endblock %}
+
+{% block content %}
+<div class="mb-4"><h1 class="h3 mb-1">Order queue</h1><p class="text-body-secondary mb-0">Paid orders and their confirmed allocations.</p></div>
+
+{% for message in messages %}
+  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
+{% endfor %}
+
+{% for order in orders %}
+  <section class="card mb-4">
+    <div class="card-header d-flex flex-wrap justify-content-between gap-2">
+      <div><h2 class="h5 mb-1">Order #{{ order.pk }} · {{ order.customer.name }}</h2><div class="small text-body-secondary">{{ order.customer.email }} · placed {{ order.placed_at }}</div></div>
+      <div class="text-md-end"><div>Payment: {{ order.payment_status }}</div><div>Order status: {{ order.status }}</div><strong>Total: ${{ order.total_snapshot }}</strong></div>
+    </div>
+    <div class="card-body">
+      <h3 class="h6">Delivery</h3>
+      <p>{{ order.delivery_name }}<br>{{ order.delivery_address }}{% if order.delivery_phone %}<br>{{ order.delivery_phone }}{% endif %}</p>
+      {% if order.shipment %}<p class="small">Shipment: {{ order.shipment.status }}{% if order.shipment.courier %} · {{ order.shipment.courier }}{% endif %}{% if order.shipment.tracking_ref %} · Tracking {{ order.shipment.tracking_ref }}{% endif %}</p>{% endif %}
+      <h3 class="h6">Items and allocations</h3>
+      <div class="list-group">
+        {% for line in order.lines.all %}
+          <div class="list-group-item">
+            <div class="d-flex justify-content-between gap-3"><strong>{{ line.name }}</strong><span>{{ line.kind }} · Qty {{ line.quantity }} · ${{ line.unit_price_snapshot }} each</span></div>
+            {% if line.kind == "build" %}
+              {% for pc in line.pcs.all %}
+                <div class="border rounded p-3 mt-3">
+                  <div class="d-flex flex-wrap justify-content-between gap-2"><strong>PC #{{ pc.pk }} (unit {{ pc.unit_index }}) · {{ pc.status }}</strong>{% if pc.hold_reason %}<span class="text-danger">{{ pc.hold_reason }}</span>{% endif %}</div>
+                  {% if pc.allocation_issues %}<ul class="small text-danger mt-2 mb-2">{% for issue in pc.allocation_issues %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
+                  <ul class="small mb-3">
+                    {% for reservation in pc.reservations.all %}
+                      <li>{% if reservation.component %}{{ reservation.component }}{% else %}{{ reservation.accessory }}{% endif %} × {{ reservation.quantity }} · {{ reservation.status }}</li>
+                    {% empty %}<li>No allocations recorded.</li>{% endfor %}
+                  </ul>
+                  <div class="d-flex flex-wrap gap-2">
+                    {% if pc.status == "queued" or pc.status == "on_hold" %}
+                      <form method="post" action="{% url 'orders:start_order' pc.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Start assembly</button></form>
+                    {% endif %}
+                    {% if pc.status == "queued" or pc.status == "assembling" %}
+                      <form class="d-flex gap-2" method="post" action="{% url 'orders:hold_pc' pc.pk %}">{% csrf_token %}<label class="visually-hidden" for="hold-{{ pc.pk }}">Reason PC {{ pc.pk }} is on hold</label><input class="form-control form-control-sm" id="hold-{{ pc.pk }}" name="reason" placeholder="Reason for hold" required><button class="btn btn-outline-danger btn-sm" type="submit">Put on hold</button></form>
+                    {% endif %}
+                    {% if pc.status == "assembling" %}<form method="post" action="{% url 'orders:start_quality_check' pc.pk %}">{% csrf_token %}<button class="btn btn-outline-primary btn-sm" type="submit">Begin quality checks</button></form>{% endif %}
+                    {% if not pc.has_pending_substitution and pc.status != "quality_passed" and pc.status != "cancelled" %}<a class="btn btn-outline-warning btn-sm" href="{% url 'orders:propose_substitution' pc.pk %}">Propose replacement</a>{% endif %}
+                  </div>
+                  {% if pc.status == "quality_checking" or pc.status == "corrective_work" %}
+                    <form class="row g-2 mt-2" method="post" action="{% url 'orders:record_quality_check' pc.pk %}">
+                      {% csrf_token %}
+                      <div class="col-md-4"><label class="form-label small" for="check-{{ pc.pk }}">Check</label><select class="form-select form-select-sm" id="check-{{ pc.pk }}" name="checklist_item"><option value="installed_parts">Installed parts</option><option value="startup">Successful startup</option><option value="stability">Basic stability</option></select></div>
+                      <div class="col-md-2"><label class="form-label small" for="result-{{ pc.pk }}">Result</label><select class="form-select form-select-sm" id="result-{{ pc.pk }}" name="passed"><option value="yes">Pass</option><option value="no">Fail</option></select></div>
+                      <div class="col-md-3"><label class="form-label small" for="fault-{{ pc.pk }}">Faulty component, if known</label><select class="form-select form-select-sm" id="fault-{{ pc.pk }}" name="faulty_component"><option value="">Not applicable</option>{% for reservation in pc.reservations.all %}{% if reservation.component and reservation.status == "reserved" %}<option value="{{ reservation.component_id }}">{{ reservation.component }}</option>{% endif %}{% endfor %}</select></div>
+                      <div class="col-md-3"><label class="form-label small" for="note-{{ pc.pk }}">Failure reason / note</label><input class="form-control form-control-sm" id="note-{{ pc.pk }}" name="note"></div>
+                      <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Record check</button></div>
+                    </form>
+                  {% endif %}
+                </div>
+              {% empty %}<p class="small text-body-secondary mb-0">No PC units have been created for this line.</p>{% endfor %}
+            {% else %}
+              <ul class="small mb-0 mt-2">
+                {% for reservation in line.reservations.all %}<li>{{ reservation.accessory }} × {{ reservation.quantity }} · {{ reservation.status }}</li>{% empty %}<li>No accessory allocation recorded.</li>{% endfor %}
+              </ul>
+            {% endif %}
+          </div>
+        {% empty %}<p class="text-body-secondary">No line items.</p>{% endfor %}
+      </div>
+      {% if order.accessory_allocation_issues %}<p class="small text-danger mt-3">{{ order.accessory_allocation_issues|join:" " }}</p>{% endif %}
+      {% if order.can_start_packing %}<form class="mt-3" method="post" action="{% url 'orders:start_packing' order.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Mark order packed</button></form>{% endif %}
+      {% if order.can_dispatch %}
+        <form class="row g-2 mt-2" method="post" action="{% url 'orders:dispatch_order' order.pk %}">
+          {% csrf_token %}
+          <div class="col-md-4"><label class="form-label small" for="courier-{{ order.pk }}">Courier (optional)</label><input class="form-control form-control-sm" id="courier-{{ order.pk }}" name="courier"></div>
+          <div class="col-md-4"><label class="form-label small" for="tracking-{{ order.pk }}">Tracking reference (optional)</label><input class="form-control form-control-sm" id="tracking-{{ order.pk }}" name="tracking_ref"></div>
+          <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Dispatch order</button></div>
+        </form>
+      {% endif %}
+      {% if order.status == "dispatched" %}<form class="mt-2" method="post" action="{% url 'orders:staff_confirm_delivery' order.pk %}">{% csrf_token %}<button class="btn btn-outline-primary btn-sm" type="submit">Confirm delivery</button></form>{% endif %}
+    </div>
+  </section>
+{% empty %}
+  <div class="alert alert-info" role="status">No paid orders are waiting in the queue.</div>
+{% endfor %}
+{% endblock %}

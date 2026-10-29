@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} | BuildWise{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'catalogue:preset_manage_list' %}" class="link-secondary">← PC presets</a>
+  <h1 class="h3 mt-2">{{ title }}</h1>
+</div>
+
+<div class="card"><div class="card-body">
+  <form method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3 mb-4">
+      {% for field in form %}
+        <div class="col-md-6">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}<div class="text-danger small" role="alert">{{ error }}</div>{% endfor %}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <h2 class="h5">Components and quantities</h2>
+    {{ formset.management_form }}
+    {% if formset.non_form_errors %}<div class="alert alert-danger">{{ formset.non_form_errors }}</div>{% endif %}
+    <div class="row g-3">
+      {% for item_form in formset %}
+        <div class="col-lg-6">
+          <fieldset class="border rounded p-3 h-100">
+            <legend class="float-none w-auto px-1 fs-6">Component {{ forloop.counter }}</legend>
+            {% for hidden in item_form.hidden_fields %}{{ hidden }}{% endfor %}
+            <div class="row g-2">
+              {% for field in item_form.visible_fields %}
+                <div class="{% if field.name == 'DELETE' %}col-12{% else %}col-md-8{% endif %}">
+                  {% if field.name == "DELETE" %}
+                    <div class="form-check">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
+                  {% else %}
+                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                  {% endif %}
+                  {% for error in field.errors %}<div class="text-danger small" role="alert">{{ error }}</div>{% endfor %}
+                </div>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary mt-4" type="submit">Save preset</button>
+  </form>
+</div></div>
+{% endblock %}

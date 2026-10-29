@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory | BuildWise{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div><h1 class="h3 mb-1">Inventory</h1><p class="text-body-secondary mb-0">Available stock excludes units reserved for orders.</p></div>
+  <a class="btn btn-primary" href="{% url 'inventory:adjustment_create' %}">Record adjustment</a>
+</div>
+
+{% for message in messages %}
+  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
+{% endfor %}
+
+<section class="card mb-4">
+  <div class="card-header"><h2 class="h5 mb-0">Components</h2></div>
+  <div class="table-responsive"><table class="table table-striped align-middle mb-0">
+    <thead><tr><th scope="col">Component</th><th scope="col">Status</th><th scope="col">Physical</th><th scope="col">Reserved</th><th scope="col">Available</th></tr></thead>
+    <tbody>
+      {% for row in components %}<tr>
+        <td>{{ row.item.get_category_display }} — {{ row.item.brand }} {{ row.item.model }}</td>
+        <td>{% if row.item.active %}Active{% else %}Inactive{% endif %}</td><td>{{ row.physical }}</td><td>{{ row.reserved }}</td><td><strong>{{ row.available }}</strong></td>
+      </tr>{% empty %}<tr><td class="text-body-secondary" colspan="5">No components in the catalogue.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card mb-4">
+  <div class="card-header"><h2 class="h5 mb-0">Accessories</h2></div>
+  <div class="table-responsive"><table class="table table-striped align-middle mb-0">
+    <thead><tr><th scope="col">Accessory</th><th scope="col">Status</th><th scope="col">Physical</th><th scope="col">Reserved</th><th scope="col">Available</th></tr></thead>
+    <tbody>
+      {% for row in accessories %}<tr>
+        <td>{{ row.item.category }} — {{ row.item.name }}</td>
+        <td>{% if row.item.active %}Active{% else %}Inactive{% endif %}</td><td>{{ row.physical }}</td><td>{{ row.reserved }}</td><td><strong>{{ row.available }}</strong></td>
+      </tr>{% empty %}<tr><td class="text-body-secondary" colspan="5">No accessories in the catalogue.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <div class="card-header"><h2 class="h5 mb-0">Recent stock adjustments</h2></div>
+  <div class="table-responsive"><table class="table table-striped align-middle mb-0">
+    <thead><tr><th scope="col">When</th><th scope="col">Item</th><th scope="col">Change</th><th scope="col">Reason</th><th scope="col">Recorded by</th></tr></thead>
+    <tbody>
+      {% for adjustment in adjustments %}<tr>
+        <td>{{ adjustment.created_at }}</td><td>{% if adjustment.component %}{{ adjustment.component }}{% else %}{{ adjustment.accessory }}{% endif %}</td><td>{{ adjustment.delta }}</td><td>{{ adjustment.reason }}</td><td>{{ adjustment.created_by.user.get_username }}</td>
+      </tr>{% empty %}<tr><td class="text-body-secondary" colspan="5">No stock adjustments recorded.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Propose replacement | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'orders:order_queue' %}">← Order queue</a></p>
+<h1 class="h3">Propose a component replacement</h1><p class="text-body-secondary">PC #{{ pc.pk }} · Order #{{ order.pk }}. The PC will remain on hold until the customer decides; the confirmed price will not change.</p>
+<form method="post" class="card card-body">{% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{{ form.as_p }}<button class="btn btn-primary align-self-start" type="submit">Send proposal</button></form>
+{% endblock %}

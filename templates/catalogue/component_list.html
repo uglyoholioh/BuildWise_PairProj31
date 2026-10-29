@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Component catalogue | BuildWise{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+  <div>
+    <h1 class="h3 mb-1">Component catalogue</h1>
+    <p class="text-body-secondary mb-0">Maintain component specifications, prices and availability.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-primary" href="{% url 'catalogue:compatibility_rules' %}">Compatibility rules</a>
+    <a class="btn btn-primary" href="{% url 'catalogue:component_create' %}">Add component</a>
+  </div>
+</div>
+
+{% for message in messages %}
+  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
+{% endfor %}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-striped align-middle mb-0">
+      <thead>
+        <tr><th scope="col">Category</th><th scope="col">Component</th><th scope="col">Specifications</th><th scope="col">Price</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        {% for component in components %}
+          <tr>
+            <td>{{ component.get_category_display }}</td>
+            <td><strong>{{ component.brand }} {{ component.model }}</strong>{% if component.description %}<div class="small text-body-secondary">{{ component.description }}</div>{% endif %}</td>
+            <td>
+              {% if component.socket %}Socket: {{ component.socket }}<br>{% endif %}
+              {% if component.memory_type %}Memory: {{ component.memory_type }}<br>{% endif %}
+              {% if component.form_factor %}Form factor: {{ component.form_factor }}<br>{% endif %}
+              {% if component.ml_tier %}Tier: {{ component.ml_tier }}{% endif %}
+              {% if component.specs %}<details><summary>More specs</summary><pre class="mb-0">{{ component.specs }}</pre></details>{% endif %}
+            </td>
+            <td>${{ component.price }}</td>
+            <td>{% if component.active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+            <td><a class="btn btn-outline-primary btn-sm" href="{% url 'catalogue:component_update' component.pk %}">Edit</a></td>
+          </tr>
+        {% empty %}
+          <tr><td class="text-body-secondary" colspan="6">No components have been added.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Gaming needs | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3 mb-1">Your gaming needs</h1><p class="text-body-secondary">Choose up to three games and set one budget for the complete PC. Accessories are priced separately.</p>
+<form method="post" class="card card-body">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="mb-3"><label class="form-label" for="id_perf_level">Performance preset</label>{{ form.perf_level }}<div class="form-text">Balanced is the default; each game's visible target and settings can be adjusted below.</div></div>
+  <div class="mb-4"><label class="form-label" for="id_max_spend">Maximum PC budget</label><div class="input-group"><span class="input-group-text">$</span>{{ form.max_spend }}</div>{% for error in form.max_spend.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<div class="form-text">Includes the assembly and testing fee.</div></div>
+  <fieldset class="mb-4"><legend class="h5">Games</legend><label class="form-label" for="game-search">Search supported games</label><input class="form-control mb-2" type="search" id="game-search" placeholder="Type a game name"><div id="game-options">{{ form.games }}</div><div class="form-text">Select no more than three.</div>{% for error in form.games.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</fieldset>
+  {% for setting in game_settings %}<fieldset class="border rounded p-3 mb-3" data-setting-pairs="{{ setting.pairs }}"><legend class="h6">{{ setting.game.name }}</legend><div class="row g-3"><div class="col-md-4"><label class="form-label" for="{{ setting.fps_goal.id_for_label }}">FPS target</label>{{ setting.fps_goal }}{% for error in setting.fps_goal.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div><div class="col-md-4"><label class="form-label" for="{{ setting.resolution.id_for_label }}">Resolution</label>{{ setting.resolution }}{% for error in setting.resolution.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div><div class="col-md-4"><label class="form-label" for="{{ setting.graphics_preset.id_for_label }}">Graphics preset</label>{{ setting.graphics_preset }}{% for error in setting.graphics_preset.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div></div></fieldset>{% endfor %}
+  <button class="btn btn-primary align-self-start" type="submit">See recommendations</button>
+</form>
+<script>
+  document.getElementById("game-search").addEventListener("input", function () {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll("#game-options li").forEach((item) => {
+      item.hidden = !item.textContent.toLowerCase().includes(query);
+    });
+  });
+  document.querySelectorAll("[data-setting-pairs]").forEach((group) => {
+    const fields = group.querySelectorAll("input, select");
+    const resolutionField = fields[1];
+    const graphicsField = fields[2];
+    const pairs = group.dataset.settingPairs.split(",").map((pair) => pair.split("|"));
+    function filterGraphics() {
+      const allowed = pairs.filter((pair) => pair[0] === resolutionField.value).map((pair) => pair[1]);
+      [...graphicsField.options].forEach((option) => { option.hidden = !allowed.includes(option.value); });
+      if (!allowed.includes(graphicsField.value)) graphicsField.value = allowed[0] || "";
+    }
+    resolutionField.addEventListener("change", filterGraphics);
+    filterGraphics();
+  });
+</script>
+{% endblock %}
