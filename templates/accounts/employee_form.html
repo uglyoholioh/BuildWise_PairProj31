@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'employee_list' %}">← Employees</a></p>
+<h1 class="h3">{{ title }}</h1>
+<p>Inactive employees cannot sign in. Historical records keep their employee attribution. At least one active manager must remain.</p>
+<form method="post" class="card card-body">{% csrf_token %}{{ form.as_p }}<button type="submit" class="btn btn-primary align-self-start">Save employee</button></form>
+{% endblock %}

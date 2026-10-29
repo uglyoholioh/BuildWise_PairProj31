@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Employees | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3">Employees</h1>
+{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}
+<p><a class="btn btn-primary" href="{% url 'employee_create' %}">Create employee</a></p>
+<table class="table"><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Manage</th></tr></thead><tbody>
+{% for employee in employees %}<tr><td>{{ employee.user.username }}</td><td>{{ employee.user.get_full_name }}</td><td>{{ employee.get_role_display }}</td><td>{% if employee.active and employee.user.is_active %}Yes{% else %}No{% endif %}</td><td><a href="{% url 'employee_update' employee.pk %}">Manage</a></td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

@@ -26,6 +26,7 @@
       <a class="nav-link text-light ms-2" href="{% url 'accounts:customer_list' %}">Customers</a>
       <a class="nav-link text-light ms-2" href="{% url 'support:staff_request_list' %}">Support</a>
       {% if user.employee_profile.role == "manager" %}
+      <a class="nav-link text-light ms-2" href="{% url 'employee_list' %}">Employees</a>
       <a class="nav-link text-light ms-2" href="{% url 'catalogue:assembly_fee' %}">Assembly fee</a>
       {% endif %}
       {% else %}
