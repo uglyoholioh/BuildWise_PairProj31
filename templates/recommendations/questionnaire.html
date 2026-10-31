@@ -6,14 +6,16 @@
   {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
   <div class="mb-3"><label class="form-label" for="id_perf_level">Performance preset</label>{{ form.perf_level }}<div class="form-text">Balanced is the default; each game's visible target and settings can be adjusted below.</div></div>
   <div class="mb-4"><label class="form-label" for="id_max_spend">Maximum PC budget</label><div class="input-group"><span class="input-group-text">$</span>{{ form.max_spend }}</div>{% for error in form.max_spend.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<div class="form-text">Includes the assembly and testing fee.</div></div>
-  <fieldset class="mb-4"><legend class="h5">Games</legend><label class="form-label" for="game-search">Search supported games</label><input class="form-control mb-2" type="search" id="game-search" placeholder="Type a game name"><div id="game-options">{{ form.games }}</div><div class="form-text">Select no more than three.</div>{% for error in form.games.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</fieldset>
+  <fieldset class="mb-4"><legend class="h5">Games</legend><label class="form-label" for="game-search">Search supported games</label><input class="form-control mb-2" type="search" id="game-search" placeholder="Type a game name"><div id="game-options">{% for option in form.games %}<div class="game-option">{{ option }}</div>{% endfor %}</div><div class="form-text">Select no more than three.</div>{% for error in form.games.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</fieldset>
   {% for setting in game_settings %}<fieldset class="border rounded p-3 mb-3" data-setting-pairs="{{ setting.pairs }}"><legend class="h6">{{ setting.game.name }}</legend><div class="row g-3"><div class="col-md-4"><label class="form-label" for="{{ setting.fps_goal.id_for_label }}">FPS target</label>{{ setting.fps_goal }}{% for error in setting.fps_goal.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div><div class="col-md-4"><label class="form-label" for="{{ setting.resolution.id_for_label }}">Resolution</label>{{ setting.resolution }}{% for error in setting.resolution.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div><div class="col-md-4"><label class="form-label" for="{{ setting.graphics_preset.id_for_label }}">Graphics preset</label>{{ setting.graphics_preset }}{% for error in setting.graphics_preset.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div></div></fieldset>{% endfor %}
-  <button class="btn btn-primary align-self-start" type="submit">See recommendations</button>
+  <p class="form-text">Step 1: choose games and update settings. Step 2: review the visible targets, then see recommendations.</p>
+  <div class="d-flex gap-2"><button class="btn btn-outline-primary" type="submit" name="action" value="settings" formnovalidate>Update games and settings</button>
+  {% if game_settings %}<button class="btn btn-primary" type="submit" name="action" value="recommend">See recommendations</button>{% endif %}</div>
 </form>
 <script>
   document.getElementById("game-search").addEventListener("input", function () {
     const query = this.value.toLowerCase();
-    document.querySelectorAll("#game-options li").forEach((item) => {
+    document.querySelectorAll("#game-options .game-option").forEach((item) => {
       item.hidden = !item.textContent.toLowerCase().includes(query);
     });
   });

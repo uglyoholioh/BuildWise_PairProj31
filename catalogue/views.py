@@ -9,6 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from accounts.models import Employee, StaffAction
 from accounts.models import Customer
+from accounts.views import active_manager
 from inventory.availability import available_accessory_quantity
 from .compatibility import check_compatibility, check_configuration_components, revalidate_configurations
 from .forms import (
@@ -479,16 +480,6 @@ def preset_create(request):
 @require_http_methods(["GET", "POST"])
 def preset_update(request, pk):
     return _edit_preset(request, get_object_or_404(Configuration, pk=pk))
-
-
-def active_manager(user):
-    return (
-        user.is_authenticated
-        and user.is_active
-        and Employee.objects.filter(
-            user=user, active=True, role=Employee.Role.MANAGER
-        ).exists()
-    )
 
 
 @user_passes_test(active_manager, login_url="staff_login")

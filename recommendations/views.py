@@ -52,6 +52,29 @@ def questionnaire(request):
         initial=initial,
         initial_response=previous,
     )
+    if request.method == "POST":
+        selection = QuestionnaireForm(request.POST, include_settings=False)
+        if not selection.is_valid():
+            form = selection
+        else:
+            draft = request.session.get("questionnaire_draft", {})
+            # Keep edits to removed games so re-adding a game restores its settings.
+            for game_id in GameSettingSupport.objects.values_list("game_id", flat=True).distinct():
+                for suffix in ("fps_goal", "resolution", "graphics_preset"):
+                    key = f"game_{game_id}_{suffix}"
+                    if key in request.POST:
+                        draft[key] = request.POST[key]
+            request.session["questionnaire_draft"] = draft
+            needs_settings = any(name not in request.POST for name in form.fields if name.startswith("game_"))
+            if request.POST.get("action") == "settings" or needs_settings:
+                initial = dict(draft)
+                initial.update({"games": list(selection.cleaned_data["games"].values_list("pk", flat=True)),
+                                "perf_level": selection.cleaned_data["perf_level"],
+                                "max_spend": selection.cleaned_data["max_spend"]})
+                form = QuestionnaireForm(initial=initial, initial_response=previous)
+                return render(request, "recommendations/questionnaire.html", {
+                    "form": form, "game_settings": form.game_settings,
+                })
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             response = QuestionnaireResponse.objects.create(
@@ -69,6 +92,7 @@ def questionnaire(request):
                     graphics_preset=form.cleaned_data[f"{prefix}_graphics_preset"],
                 )
         request.session["questionnaire_response_id"] = response.pk
+        request.session.pop("questionnaire_draft", None)
         messages.success(request, "Your gaming needs have been saved.")
         return redirect("recommendations:recommendations")
     return render(

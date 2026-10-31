@@ -5,28 +5,44 @@ from django import forms
 from .models import Game, GameSettingSupport, QuestionnaireResponse
 
 
+class SupportedGamesField(forms.ModelMultipleChoiceField):
+    def clean(self, value):
+        for game_id in value or []:
+            text = str(game_id)
+            if not text.isascii() or not text.isdecimal() or len(text) > 19 or not 0 < int(text) <= 9223372036854775807:
+                raise forms.ValidationError("Choose valid supported games.")
+        return super().clean(value)
+
+
 class QuestionnaireForm(forms.Form):
     PERF_LEVELS = (("balanced", "Balanced (default)"),)
-    games = forms.ModelMultipleChoiceField(
+    games = SupportedGamesField(
         queryset=Game.objects.filter(supported_settings__isnull=False).distinct().order_by("name"),
         widget=forms.CheckboxSelectMultiple,
-        required=False,
+        required=True,
     )
     perf_level = forms.ChoiceField(choices=PERF_LEVELS, initial="balanced")
     max_spend = forms.DecimalField(min_value=Decimal("0.01"), max_digits=10, decimal_places=2)
 
-    def __init__(self, *args, initial_response=None, **kwargs):
+    def __init__(self, *args, initial_response=None, include_settings=True, **kwargs):
         super().__init__(*args, **kwargs)
         if self.is_bound:
             selected = self.data.getlist("games") if hasattr(self.data, "getlist") else self.data.get("games", [])
             selected = selected if isinstance(selected, (list, tuple)) else [selected]
         else:
-            selected = [str(row.game_id) for row in initial_response.game_settings.all()] if initial_response else []
+            selected = self.initial.get("games", [str(row.game_id) for row in initial_response.game_settings.all()] if initial_response else [])
         if initial_response:
             self.fields["max_spend"].initial = initial_response.max_spend
             self.fields["perf_level"].initial = initial_response.perf_level
         self.game_settings = []
-        for game in self.fields["games"].queryset.filter(pk__in=selected):
+        # Let ModelMultipleChoiceField validate IDs before querying dynamic settings.
+        try:
+            games = self.fields["games"].clean(selected)
+        except forms.ValidationError:
+            games = []
+        if not include_settings or len(games) > 3:
+            games = []
+        for game in games:
             supported = list(game.supported_settings.order_by("resolution", "graphics_preset"))
             resolutions = sorted({row.resolution for row in supported})
             default_setting = next(
