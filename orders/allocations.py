@@ -1,6 +1,8 @@
 from django.db.models import Sum
 
+from catalogue.compatibility import check_configuration_components
 from catalogue.models import Component
+from inventory.availability import available_component_quantity
 from inventory.models import Reservation
 
 
@@ -19,11 +21,16 @@ def approved_pc_parts(purchased_pc):
     line = purchased_pc.order_line
     parts = [dict(part) for part in line.custom_snapshot.get("components", [])]
     if not parts and line.configuration_id:
-        parts = [component_snapshot(item.component, item.quantity)
-                 for item in line.configuration.items.select_related("component")]
+        parts = [
+            component_snapshot(item.component, item.quantity)
+            for item in line.configuration.items.select_related("component")
+        ]
     for proposal in purchased_pc.substitutions.filter(status="accepted").order_by("decided_at", "pk"):
-        original = next((part for part in parts if part["component_id"] == proposal.original_component_id
-                         and part["quantity"] > 0), None)
+        original = None
+        for part in parts:
+            if part["component_id"] == proposal.original_component_id and part["quantity"] > 0:
+                original = part
+                break
         if original:
             original["quantity"] -= 1
             replacement = dict(proposal.replacement_snapshot or component_snapshot(proposal.replacement_component))
@@ -42,17 +49,19 @@ def expected_pc_quantities(purchased_pc):
 
 def reserved_pc_quantities(purchased_pc):
     return dict(
-        Reservation.objects.filter(purchased_pc=purchased_pc, status=Reservation.Status.RESERVED,
-                                   component__isnull=False)
-        .values("component_id").annotate(total=Sum("quantity")).values_list("component_id", "total")
+        Reservation.objects.filter(
+            purchased_pc=purchased_pc,
+            status=Reservation.Status.RESERVED,
+            component__isnull=False,
+        )
+        .values("component_id")
+        .annotate(total=Sum("quantity"))
+        .values_list("component_id", "total")
     )
 
 
 def substitution_issues(purchased_pc, original, replacement):
     """Validate a one-unit change against the complete approved specification."""
-    from catalogue.compatibility import check_configuration_components
-    from inventory.availability import available_component_quantity
-
     expected = expected_pc_quantities(purchased_pc)
     if expected.get(original.pk, 0) < 1:
         return ["The original component is no longer part of this PC."]
