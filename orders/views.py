@@ -15,7 +15,6 @@ from inventory.availability import available_accessory_quantity, available_compo
 from inventory.models import Reservation, StockAdjustment
 from .allocations import (
     accessory_allocation_issues,
-    approved_pc_parts,
     component_snapshot,
     expected_pc_quantities,
     purchased_pc_allocation_issues,
@@ -24,6 +23,7 @@ from .allocations import (
 )
 from .forms import CheckoutForm, DispatchForm, HoldPCForm, QualityCheckForm, SubstitutionProposalForm
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
+from .substitutions import replacement_details_changed, substitution_review_snapshot
 
 
 def _build_snapshot(items):
@@ -312,7 +312,13 @@ def order_detail(request, pk):
         pk=pk,
         customer__user=request.user,
     )
-    return render(request, "orders/order_detail.html", {"order": order})
+    can_decide_substitutions = (
+        order.payment_status == "paid"
+        and order.status not in ("cancelled", "delivered", "dispatched", "packing")
+    )
+    return render(request, "orders/order_detail.html", {
+        "order": order, "can_decide_substitutions": can_decide_substitutions,
+    })
 
 
 @login_required
@@ -349,12 +355,9 @@ def propose_substitution(request, pk):
                 if problems:
                     form.add_error("replacement_component", " ".join(problems))
                 else:
-                    # Validation above guarantees the original is in the approved parts.
-                    for part in approved_pc_parts(pc):
-                        if part["component_id"] == original.pk:
-                            original_snapshot = dict(part)
-                            original_snapshot["quantity"] = 1
-                            break
+                    original_snapshot, replacement_snapshot, performance_snapshot = substitution_review_snapshot(
+                        pc, original, replacement,
+                    )
                     SubstitutionProposal.objects.create(
                         purchased_pc=pc,
                         original_component=original,
@@ -365,7 +368,8 @@ def propose_substitution(request, pk):
                         fps_note=form.cleaned_data["fps_note"],
                         previous_pc_status=pc.status,
                         original_snapshot=original_snapshot,
-                        replacement_snapshot=component_snapshot(replacement),
+                        replacement_snapshot=replacement_snapshot,
+                        performance_snapshot=performance_snapshot,
                     )
                     pc.status = "on_hold"
                     pc.hold_reason = "Waiting for customer approval of a component substitution."
@@ -411,6 +415,31 @@ def decide_substitution(request, pk):
                 pc.hold_reason = " ".join(problems)
                 pc.save(update_fields=("hold_reason",))
                 messages.error(request, f"The substitution cannot be accepted yet: {pc.hold_reason}")
+            elif replacement_details_changed(proposal, replacement):
+                # Retain the old offer and require a decision on a new proposal ID.
+                original_snapshot, replacement_snapshot, performance_snapshot = substitution_review_snapshot(
+                    pc, proposal.original_component, replacement,
+                )
+                SubstitutionProposal.objects.create(
+                    purchased_pc=pc,
+                    original_component=proposal.original_component,
+                    replacement_component=replacement,
+                    proposed_by=proposal.proposed_by,
+                    reason=proposal.reason,
+                    previous_pc_status=proposal.previous_pc_status,
+                    original_snapshot=original_snapshot,
+                    replacement_snapshot=replacement_snapshot,
+                    performance_snapshot=performance_snapshot,
+                )
+                proposal.status = "superseded"
+                proposal.save(update_fields=("status",))
+                pc.hold_reason = "Replacement details changed. Please review the updated proposal before deciding."
+                pc.save(update_fields=("hold_reason",))
+                OrderStatusHistory.objects.create(
+                    order=order, from_status=order.status, to_status=order.status,
+                    note=f"PC #{pc.pk}: proposal #{proposal.pk} refreshed after replacement specifications changed; customer approval is still required.",
+                )
+                messages.warning(request, pc.hold_reason)
             else:
                 expected = expected_pc_quantities(pc)
                 actual = reserved_pc_quantities(pc)
@@ -430,8 +459,7 @@ def decide_substitution(request, pk):
                 proposal.status = "accepted"
                 proposal.decided_at = timezone.now()
                 proposal.decided_by = f"customer:{request.user.pk}"
-                proposal.replacement_snapshot = component_snapshot(replacement)
-                proposal.save(update_fields=("status", "decided_at", "decided_by", "replacement_snapshot"))
+                proposal.save(update_fields=("status", "decided_at", "decided_by"))
                 pc.status = proposal.previous_pc_status
                 if pc.status == "on_hold":
                     if pc.quality_checks.exists():
@@ -442,6 +470,10 @@ def decide_substitution(request, pk):
                         pc.status = "assembling"
                 pc.hold_reason = ""
                 pc.save(update_fields=("status", "hold_reason"))
+                OrderStatusHistory.objects.create(
+                    order=order, from_status=order.status, to_status=order.status,
+                    note=f"Customer accepted substitution #{proposal.pk} for PC #{pc.pk}; one replacement unit reserved and the confirmed price unchanged.",
+                )
                 messages.success(request, "Substitution accepted. The confirmed order price is unchanged.")
         elif decision == "decline":
             for reservation in Reservation.objects.select_for_update().filter(

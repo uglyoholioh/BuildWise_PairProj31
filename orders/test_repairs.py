@@ -10,7 +10,7 @@ from inventory.models import Reservation, StockAdjustment
 from inventory.availability import available_component_quantity
 from .allocations import component_snapshot, expected_pc_quantities, purchased_pc_allocation_issues
 from .forms import SubstitutionProposalForm
-from .models import Order, OrderLine, PurchasedPC, SubstitutionProposal, QualityCheck
+from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, SubstitutionProposal, QualityCheck
 
 
 class SubstitutionRepairTests(TestCase):
@@ -218,6 +218,198 @@ class SubstitutionRepairTests(TestCase):
         response = self.client.get(reverse('accounts:customer_detail', args=[self.customer.pk]))
         self.assertContains(response, 'Replacement CPU')
         self.assertNotContains(response, 'Renamed catalogue model')
+
+
+    def create_gaming_preferences(self, resolution="1920x1080"):
+        from recommendations.models import Game, GameSettingSupport, QuestionnaireResponse, QuestionnaireGameSetting
+        game = Game.objects.create(name="Test Game", slug="test-game")
+        GameSettingSupport.objects.create(game=game, resolution="1920x1080", graphics_preset="high")
+        response = QuestionnaireResponse.objects.create(customer=self.customer, perf_level="balanced", max_spend=1500)
+        QuestionnaireGameSetting.objects.create(response=response, game=game, fps_goal=90,
+                                                resolution=resolution, graphics_preset="high")
+        gpu = self.parts[3]
+        gpu.ml_tier = "high"
+        gpu.save()
+        self.line.custom_snapshot["components"][3]["ml_tier"] = "high"
+        self.line.save()
+        replacement = self.new_part(Component.Category.GPU, "Replacement GPU", ml_tier="enthusiast",
+                                    specs={"VRAM (GB)": 16, "Idle fan speed": 0})
+        return response, replacement
+
+    def test_customer_sees_saved_specifications_prices_and_provisional_fps(self):
+        questionnaire, replacement = self.create_gaming_preferences()
+        self.propose(original=self.parts[3], replacement=replacement)
+        proposal = self.pc.substitutions.get()
+        self.assertEqual(proposal.spec_differences, "")
+        game = proposal.performance_snapshot["games"][0]
+        self.assertEqual((game["original_fps"], game["replacement_fps"]), (76, 102))
+        self.assertTrue(game["meets_target"])
+        self.client.force_login(self.customer.user)
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        for text in ("Original component", "Proposed component", "VRAM (GB)", "16", "Idle fan speed",
+                     "Changed", "Test Game", "90 FPS", "76 FPS (estimate)", "102 FPS (estimate)",
+                     "Temporary development predictor", "Confirmed PC price", "$700.00", "$1400.00",
+                     "Declining cancels only PC"):
+            self.assertContains(page, text)
+        self.assertContains(page, "<td>0</td>", html=True)
+
+    def test_performance_history_survives_game_preferences_and_catalogue_changes(self):
+        questionnaire, replacement = self.create_gaming_preferences()
+        self.propose(original=self.parts[3], replacement=replacement)
+        proposal = self.pc.substitutions.get()
+        snapshot = proposal.performance_snapshot
+        self.decide()
+        replacement.ml_tier = "entry"
+        replacement.model = "Later name"
+        replacement.save()
+        setting = questionnaire.game_settings.get()
+        setting.fps_goal = 300
+        setting.save()
+        setting.game.name = "Later game name"
+        setting.game.save()
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        self.assertContains(page, "Test Game")
+        self.assertContains(page, "102 FPS (estimate)")
+        self.assertNotContains(page, "Later game name")
+        self.assertNotContains(page, "Later name")
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.performance_snapshot, snapshot)
+        self.assertEqual(proposal.status, "accepted")
+        self.assertContains(page, "Your decision was recorded")
+        self.assertEqual(OrderStatusHistory.objects.filter(note__contains="Customer accepted substitution").count(), 1)
+
+    def test_missing_preferences_and_unsupported_estimates_are_explicit(self):
+        self.propose()
+        self.client.force_login(self.customer.user)
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        self.assertContains(page, "No saved gaming preferences")
+        self.decide()
+        questionnaire, replacement = self.create_gaming_preferences(resolution="unsupported-resolution")
+        self.propose(original=self.parts[3], replacement=replacement)
+        proposal = self.pc.substitutions.latest("pk")
+        game = proposal.performance_snapshot["games"][0]
+        self.assertIsNone(game["original_fps"])
+        self.assertIsNone(game["replacement_fps"])
+        self.client.force_login(self.customer.user)
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        self.assertContains(page, "Unavailable for this build or these settings")
+
+    def test_missing_gpu_tier_does_not_invent_revised_estimate(self):
+        questionnaire, replacement = self.create_gaming_preferences()
+        replacement.ml_tier = "unknown-tier"
+        replacement.save()
+        self.propose(original=self.parts[3], replacement=replacement)
+        game = self.pc.substitutions.get().performance_snapshot["games"][0]
+        self.assertEqual(game["original_fps"], 76)
+        self.assertIsNone(game["replacement_fps"])
+        self.assertFalse(game["meets_target"])
+
+    def test_changed_offer_requires_new_decision_and_keeps_pending_hold(self):
+        self.propose()
+        old = self.pc.substitutions.get()
+        old.fps_note = "Old staff performance note"
+        old.save()
+        self.replacement.specs = {"Clock": "Changed specification"}
+        self.replacement.save()
+        self.decide()
+        old.refresh_from_db()
+        self.pc.refresh_from_db()
+        updated = self.pc.substitutions.get(status="pending")
+        self.assertEqual(old.status, "superseded")
+        self.assertIsNone(old.decided_at)
+        self.assertEqual(self.pc.status, "on_hold")
+        self.assertNotEqual(old.pk, updated.pk)
+        self.assertEqual(updated.replacement_snapshot["specs"], self.replacement.specs)
+        self.assertEqual(updated.fps_note, "")
+        self.assertEqual(updated.previous_pc_status, "queued")
+        self.assertFalse(Reservation.objects.filter(purchased_pc=self.pc, component=self.replacement).exists())
+        self.client.post(reverse("orders:decide_substitution", args=[old.pk]), {"decision": "accept"})
+        self.assertEqual(self.pc.substitutions.count(), 2)
+        self.client.force_login(self.employee.user)
+        self.client.post(reverse("orders:start_order", args=[self.pc.pk]))
+        self.pc.refresh_from_db()
+        self.assertEqual(self.pc.status, "on_hold")
+        self.decide()
+        self.decide()
+        updated.refresh_from_db()
+        self.assertEqual(updated.status, "accepted")
+        self.assertEqual(Reservation.objects.filter(purchased_pc=self.pc, component=self.replacement, status="reserved").count(), 1)
+        self.assertEqual(expected_pc_quantities(self.sibling)[self.cpu.pk], 1)
+
+    def test_price_change_alone_does_not_change_offer_or_order_total(self):
+        self.propose()
+        proposal = self.pc.substitutions.get()
+        quoted_price = proposal.replacement_snapshot["price"]
+        self.replacement.price = 999
+        self.replacement.save()
+        self.decide()
+        proposal.refresh_from_db()
+        self.order.refresh_from_db()
+        self.assertEqual(proposal.status, "accepted")
+        self.assertEqual(proposal.replacement_snapshot["price"], quoted_price)
+        self.assertEqual(self.order.total_snapshot, Decimal("1400.00"))
+        self.assertEqual(self.pc.substitutions.count(), 1)
+
+    def test_legacy_proposal_stays_readable_and_requires_fresh_review(self):
+        self.propose()
+        proposal = self.pc.substitutions.get()
+        proposal.original_snapshot = {}
+        proposal.replacement_snapshot = {}
+        proposal.performance_snapshot = {}
+        proposal.save()
+        self.client.force_login(self.customer.user)
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        self.assertContains(page, "historical description unavailable")
+        self.assertContains(page, "No performance estimates were recorded")
+        self.decide()
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, "superseded")
+        self.assertEqual(self.pc.substitutions.filter(status="pending").count(), 1)
+
+    def test_cancelled_order_does_not_show_decision_controls(self):
+        self.propose()
+        self.client.force_login(self.customer.user)
+        self.client.post(reverse("orders:order_cancel", args=[self.order.pk]))
+        page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
+        self.assertNotContains(page, "Accept replacement")
+        self.assertNotContains(page, "Decline and refund this PC")
+        self.decide()
+        self.assertFalse(self.pc.substitutions.filter(status="accepted").exists())
+
+    def test_declining_started_pc_preserves_sibling_and_records_refund_once(self):
+        self.client.post(reverse("orders:start_order", args=[self.pc.pk]))
+        self.propose()
+        self.decide("decline")
+        proposal = self.pc.substitutions.get()
+        decided_at = proposal.decided_at
+        self.decide("decline")
+        self.pc.refresh_from_db()
+        self.sibling.refresh_from_db()
+        self.order.refresh_from_db()
+        proposal.refresh_from_db()
+        self.assertEqual(self.pc.status, "cancelled")
+        self.assertEqual(self.pc.refund_amount, Decimal("700.00"))
+        self.assertEqual(proposal.decided_at, decided_at)
+        self.assertEqual(proposal.decided_by, f"customer:{self.customer.user_id}")
+        self.assertEqual(self.sibling.status, "queued")
+        self.assertEqual(self.order.status, "in_progress")
+        self.assertEqual(Reservation.objects.filter(purchased_pc=self.pc, status="reserved").count(), 7)
+        self.client.force_login(self.employee.user)
+        self.client.post(reverse("orders:start_order", args=[self.sibling.pk]))
+        self.sibling.refresh_from_db()
+        self.assertEqual(self.sibling.status, "assembling")
+
+    def test_decision_requires_post_and_csrf_token(self):
+        from django.test import Client
+        self.propose()
+        proposal = self.pc.substitutions.get()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.customer.user)
+        url = reverse("orders:decide_substitution", args=[proposal.pk])
+        self.assertEqual(client.get(url).status_code, 405)
+        self.assertEqual(client.post(url, {"decision": "accept"}).status_code, 403)
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, "pending")
 
 
 class IntegratedPurchaseTests(TestCase):
