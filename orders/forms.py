@@ -77,8 +77,8 @@ class SubstitutionProposalForm(forms.Form):
     original_component = forms.ModelChoiceField(queryset=Component.objects.none())
     replacement_component = forms.ModelChoiceField(queryset=Component.objects.none())
     reason = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
-    spec_differences = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
-    fps_note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    spec_differences = forms.CharField(required=False, label="Additional specification notes", widget=forms.Textarea(attrs={"rows": 2}))
+    fps_note = forms.CharField(required=False, label="Additional performance notes", widget=forms.Textarea(attrs={"rows": 2}))
 
     def __init__(self, *args, purchased_pc, **kwargs):
         super().__init__(*args, **kwargs)

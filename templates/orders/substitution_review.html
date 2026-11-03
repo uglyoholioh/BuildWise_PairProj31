@@ -1,0 +1,74 @@
+<section class="border rounded p-3 my-3" id="substitution-{{ proposal.pk }}" aria-labelledby="substitution-title-{{ proposal.pk }}">
+  <h3 class="h5" id="substitution-title-{{ proposal.pk }}">Substitution #{{ proposal.pk }} · {{ proposal.status }}</h3>
+  <p>PC #{{ pc.pk }} · Replace one unit of
+    {% if proposal.original_snapshot %}<strong>{{ proposal.original_snapshot.brand }} {{ proposal.original_snapshot.model }}</strong>{% else %}component #{{ proposal.original_component_id }} (historical description unavailable){% endif %}
+    with {% if proposal.replacement_snapshot %}<strong>{{ proposal.replacement_snapshot.brand }} {{ proposal.replacement_snapshot.model }}</strong>{% else %}component #{{ proposal.replacement_component_id }} (historical description unavailable){% endif %}.
+  </p>
+  <p><strong>Reason:</strong> {{ proposal.reason }}</p>
+  <p>Confirmed PC price: <strong>${{ line.unit_price_snapshot }}</strong>.
+    Confirmed order total: <strong>${{ order.total_snapshot }}</strong>.
+    Accepting the replacement does not change either amount.
+  </p>
+
+  {% if proposal.specification_rows %}
+  <div class="table-responsive">
+    <table class="table table-sm">
+      <caption>Saved component specifications. Changed values are marked.</caption>
+      <thead><tr><th scope="col">Specification</th><th scope="col">Original component</th><th scope="col">Proposed component</th></tr></thead>
+      <tbody>
+        {% for row in proposal.specification_rows %}
+        <tr{% if row.changed %} class="table-warning"{% endif %}>
+          <th scope="row">{{ row.label }}{% if row.changed %} <span class="badge text-bg-secondary">Changed</span>{% endif %}</th>
+          <td>{% if row.original == None or row.original == "" %}Not recorded{% else %}{{ row.original }}{% endif %}</td>
+          <td>{% if row.replacement == None or row.replacement == "" %}Not recorded{% else %}{{ row.replacement }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if proposal.spec_differences %}<p><strong>Staff specification notes:</strong> {{ proposal.spec_differences }}</p>{% endif %}
+
+  <h4 class="h6">Estimated gaming performance</h4>
+  {% if proposal.performance_snapshot.games %}
+    <p class="small">Based on your latest saved gaming preferences when this proposal was made.
+      Method: {{ proposal.performance_snapshot.method }}. These provisional estimates use GPU tier and graphics settings;
+      they do not assess CPU differences and are not performance guarantees.</p>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <caption>Estimated FPS before and after the one-unit replacement.</caption>
+        <thead><tr><th scope="col">Game and settings</th><th scope="col">Your target</th><th scope="col">Original PC</th><th scope="col">Proposed PC</th></tr></thead>
+        <tbody>
+          {% for game in proposal.performance_snapshot.games %}
+          <tr>
+            <th scope="row">{{ game.game }}<br><span class="fw-normal">{{ game.resolution }} · {{ game.graphics_preset }}</span></th>
+            <td>{{ game.fps_goal }} FPS</td>
+            <td>{% if game.original_fps != None %}{{ game.original_fps }} FPS (estimate){% else %}Unavailable{% endif %}</td>
+            <td>{% if game.replacement_fps != None %}{{ game.replacement_fps }} FPS (estimate)<br>{% if game.meets_target %}Meets target{% else %}Below target{% endif %}{% else %}Unavailable for this build or these settings{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-body-secondary">{{ proposal.performance_snapshot.unavailable_reason|default:"No performance estimates were recorded for this proposal." }}</p>
+  {% endif %}
+  {% if proposal.fps_note %}<p><strong>Staff performance notes:</strong> {{ proposal.fps_note }}</p>{% endif %}
+
+  <p class="small">Proposed {{ proposal.proposed_at }}.{% if proposal.decided_at %} Your decision was recorded {{ proposal.decided_at }}.{% endif %}</p>
+  {% if proposal.status == "superseded" %}
+    <p class="text-body-secondary">The component details changed, so this version was replaced by a new proposal. This version was not approved.</p>
+  {% elif proposal.status == "pending" and can_decide_substitutions and pc.status == "on_hold" %}
+    <p>This PC remains on hold until you decide. Declining cancels only PC #{{ pc.pk }} and records a full simulated refund of <strong>${{ line.unit_price_snapshot }}</strong>. Any remaining PCs and accessories continue in the same order.</p>
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post" action="{% url 'orders:decide_substitution' proposal.pk %}">
+        {% csrf_token %}<input type="hidden" name="decision" value="accept">
+        <button class="btn btn-primary btn-sm" type="submit">Accept replacement</button>
+      </form>
+      <form method="post" action="{% url 'orders:decide_substitution' proposal.pk %}">
+        {% csrf_token %}<input type="hidden" name="decision" value="decline">
+        <button class="btn btn-outline-danger btn-sm" type="submit">Decline and refund this PC</button>
+      </form>
+    </div>
+  {% endif %}
+</section>

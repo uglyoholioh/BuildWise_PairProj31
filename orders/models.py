@@ -80,7 +80,13 @@ class SubstitutionProposal(models.Model):
     status = models.CharField(max_length=16, default="pending")
     original_snapshot = models.JSONField(default=dict, blank=True)
     replacement_snapshot = models.JSONField(default=dict, blank=True)
+    performance_snapshot = models.JSONField(default=dict, blank=True)
     previous_pc_status = models.CharField(max_length=24, default="queued")
     proposed_at = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True)
     decided_by = models.CharField(max_length=32, blank=True)
+
+    @property
+    def specification_rows(self):
+        from .substitutions import specification_rows
+        return specification_rows(self.original_snapshot, self.replacement_snapshot)
