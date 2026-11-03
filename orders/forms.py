@@ -3,9 +3,11 @@ from django import forms
 from catalogue.models import Component
 from accounts.models import Customer
 from inventory.models import Reservation
+from .allocations import expected_pc_quantities
 
 
 class CheckoutForm(forms.ModelForm):
+    delivery_address = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
     confirm_prices = forms.BooleanField(required=False, label="I have reviewed the current prices")
 
     class Meta:
@@ -80,12 +82,9 @@ class SubstitutionProposalForm(forms.Form):
 
     def __init__(self, *args, purchased_pc, **kwargs):
         super().__init__(*args, **kwargs)
-        reserved_ids = Reservation.objects.filter(
-            purchased_pc=purchased_pc,
-            status=Reservation.Status.RESERVED,
-            component__isnull=False,
-        ).values_list("component_id", flat=True)
-        self.fields["original_component"].queryset = Component.objects.filter(pk__in=reserved_ids)
+        expected_ids = expected_pc_quantities(purchased_pc)
+        self.fields["original_component"].queryset = Component.objects.filter(pk__in=expected_ids)
+        self.fields["original_component"].help_text = "Each proposal replaces one unit, including a missing faulty unit."
         self.fields["replacement_component"].queryset = Component.objects.filter(active=True).order_by(
             "category", "brand", "model"
         )

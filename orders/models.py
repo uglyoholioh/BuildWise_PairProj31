@@ -1,9 +1,10 @@
-from django.conf import settings
-from django.db import models
 from decimal import Decimal
+
+from django.db import models
 
 
 class Order(models.Model):
+    checkout_reference = models.CharField(max_length=64, null=True, blank=True, unique=True)
     customer = models.ForeignKey("accounts.Customer", on_delete=models.PROTECT, related_name="orders")
     status = models.CharField(max_length=32, default="placed")
     payment_status = models.CharField(max_length=24, default="pending")
@@ -31,6 +32,11 @@ class PurchasedPC(models.Model):
     status = models.CharField(max_length=24, default="queued")
     hold_reason = models.TextField(blank=True)
     refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+
+    @property
+    def approved_parts(self):
+        from .allocations import approved_pc_parts
+        return approved_pc_parts(self)
 
 
 class QualityCheck(models.Model):
@@ -72,6 +78,8 @@ class SubstitutionProposal(models.Model):
     spec_differences = models.TextField(blank=True)
     fps_note = models.TextField(blank=True)
     status = models.CharField(max_length=16, default="pending")
+    original_snapshot = models.JSONField(default=dict, blank=True)
+    replacement_snapshot = models.JSONField(default=dict, blank=True)
     previous_pc_status = models.CharField(max_length=24, default="queued")
     proposed_at = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True)

@@ -7,11 +7,11 @@
 <div class="card mb-4"><div class="card-body"><h1 class="h3">{{ customer.name }}</h1><p class="mb-1">Customer ID {{ customer.pk }}</p><p class="mb-1"><a href="mailto:{{ customer.email }}">{{ customer.email }}</a></p><p class="mb-0">Saved delivery address: {{ customer.delivery_address|default:"Not provided" }}</p></div></div>
 <h2 class="h4 mb-3">Order history</h2>
 {% for order in orders %}
-  <section class="card mb-4">
+  <section class="card mb-4" id="order-{{ order.pk }}">
     <div class="card-header d-flex flex-wrap justify-content-between gap-2"><strong>Order #{{ order.pk }} · {{ order.status }}</strong><span>{{ order.placed_at }} · {{ order.payment_status }} · ${{ order.total_snapshot }}</span></div>
     <div class="card-body">
       <h3 class="h6">Purchased items</h3>
-      <ul>{% for line in order.lines.all %}<li>{{ line.name }} × {{ line.quantity }} · ${{ line.unit_price_snapshot }} each{% if line.custom_snapshot.components %}<ul>{% for part in line.custom_snapshot.components %}<li>{{ part.name|default:part.component_id }} × {{ part.quantity }}</li>{% endfor %}</ul>{% endif %}{% for pc in line.pcs.all %}<ul><li>PC #{{ pc.pk }} · {{ pc.status }}{% if pc.refund_amount %} · Refund ${{ pc.refund_amount }}{% endif %}</li></ul>{% endfor %}</li>{% empty %}<li>No item details recorded.</li>{% endfor %}</ul>
+      <ul>{% for line in order.lines.all %}<li>{{ line.name }} × {{ line.quantity }} · ${{ line.unit_price_snapshot }} each{% if line.custom_snapshot.components %}<ul>{% for part in line.custom_snapshot.components %}<li>{{ part.brand }} {{ part.model }} × {{ part.quantity }}</li>{% endfor %}</ul>{% endif %}{% for pc in line.pcs.all %}<ul><li>PC #{{ pc.pk }} · {{ pc.status }}{% if pc.refund_amount %} · Refund ${{ pc.refund_amount }}{% endif %}{% if pc.substitutions.all %}<p>Current approved specification</p>{% include "orders/parts_snapshot.html" with parts=pc.approved_parts %}{% endif %}</li></ul>{% endfor %}</li>{% empty %}<li>No item details recorded.</li>{% endfor %}</ul>
       {% if order.shipment %}<p class="mb-3">Shipment: {{ order.shipment.status }}{% if order.shipment.courier %} · {{ order.shipment.courier }}{% endif %}{% if order.shipment.tracking_ref %} · {{ order.shipment.tracking_ref }}{% endif %}{% if order.shipment.delivered_at %} · delivered {{ order.shipment.delivered_at }}{% endif %}</p>{% endif %}
       <h3 class="h6">Fulfilment history</h3>
       <ul>{% for event in order.status_history.all %}<li>{{ event.created_at }} · {{ event.from_status|default:"created" }} → {{ event.to_status }}{% if event.employee %} · {{ event.employee.user.username }}{% endif %}{% if event.note %} · {{ event.note }}{% endif %}</li>{% empty %}<li>No status changes recorded.</li>{% endfor %}</ul>

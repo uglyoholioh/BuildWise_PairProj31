@@ -33,6 +33,18 @@ class CheckoutTests(TestCase):
             ConfigurationItem.objects.create(configuration=self.configuration, component=component, quantity=1)
             StockAdjustment.objects.create(item_type="component", component=component, delta=3, reason="Opening stock", created_by=self.employee)
 
+    def test_blank_delivery_address_does_not_change_cart_or_create_order(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.force_login(self.user)
+        cart = self.client.session["cart"]
+        response = self.client.post(reverse("orders:checkout"), {
+            "name": "Buyer", "delivery_address": "   ", "confirm_prices": "on",
+        })
+        self.assertFormError(response.context["form"], "delivery_address", "This field is required.")
+        self.assertEqual(self.client.session["cart"], cart)
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+
     def test_preset_checkout_creates_paid_order_pc_snapshots_and_reservations(self):
         self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
         cart_line = self.client.session["cart"][0]
@@ -50,6 +62,8 @@ class CheckoutTests(TestCase):
         self.assertEqual(Reservation.objects.filter(purchased_pc__order_line__order=order, status=Reservation.Status.RESERVED).count(), 14)
         self.assertEqual(order.lines.get().custom_snapshot["components"][0]["price"], "100.00")
         self.assertEqual(self.client.session["cart"], [])
+        self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road"})
+        self.assertEqual(Order.objects.count(), 1)
 
     def test_insufficient_combined_stock_keeps_cart_and_creates_no_order(self):
         for component in Component.objects.all():
@@ -278,6 +292,16 @@ class OrderQueueTests(TestCase):
 
     def create_substitution(self):
         order, pc = self.create_paid_build_pc()
+        specs = {
+            Component.Category.MOTHERBOARD: {"socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"},
+            Component.Category.MEMORY: {"memory_type": "DDR5"},
+            Component.Category.GPU: {}, Component.Category.STORAGE: {},
+            Component.Category.POWER_SUPPLY: {}, Component.Category.CASE: {"form_factor": "ATX"},
+        }
+        for category, fields in specs.items():
+            component = Component.objects.create(category=category, brand="Example", model=category, price="100.00", **fields)
+            ConfigurationItem.objects.create(configuration=self.configuration, component=component, quantity=1)
+            Reservation.objects.create(component=component, purchased_pc=pc, quantity=1)
         replacement = Component.objects.create(
             category=Component.Category.CPU,
             brand="Example",
@@ -321,7 +345,7 @@ class OrderQueueTests(TestCase):
         self.assertEqual(proposal.status, "accepted")
         self.assertEqual(proposal.decided_by, f"customer:{self.customer.user_id}")
         self.assertEqual(
-            list(Reservation.objects.filter(purchased_pc=pc, status=Reservation.Status.RESERVED).values_list("component_id", flat=True)),
+            list(Reservation.objects.filter(purchased_pc=pc, component__category=Component.Category.CPU, status=Reservation.Status.RESERVED).values_list("component_id", flat=True)),
             [replacement.pk],
         )
         self.assertEqual(

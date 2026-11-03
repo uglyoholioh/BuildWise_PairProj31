@@ -27,6 +27,15 @@ class SupportConversationTests(TestCase):
             delivery_address="1 Example Road",
         )
 
+    def test_staff_order_link_opens_protected_customer_history(self):
+        support_request = SupportRequest.objects.create(customer=self.customer, order=self.order)
+        self.client.force_login(self.employee.user)
+        page = self.client.get(reverse("support:staff_request_detail", args=[support_request.pk]))
+        history_url = reverse("accounts:customer_detail", args=[self.customer.pk])
+        self.assertContains(page, f'{history_url}#order-{self.order.pk}')
+        self.assertContains(self.client.get(history_url), f'id="order-{self.order.pk}"')
+        self.assertEqual(self.client.get(reverse("orders:order_detail", args=[self.order.pk])).status_code, 404)
+
     def test_customer_creates_and_sees_only_own_public_thread(self):
         self.client.force_login(self.customer.user)
         response = self.client.post(
