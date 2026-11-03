@@ -91,8 +91,15 @@ class EmployeeUpdateForm(forms.ModelForm):
         cleaned = super().clean()
         employee = self.instance
         removing_manager = not cleaned.get("active") or cleaned.get("role") != Employee.Role.MANAGER
-        if employee.role == Employee.Role.MANAGER and employee.active and employee.user.is_active and removing_manager:
-            others = Employee.objects.filter(role=Employee.Role.MANAGER, active=True, user__is_active=True).exclude(pk=employee.pk)
-            if not others.exists():
+        is_active_manager = (
+            employee.role == Employee.Role.MANAGER
+            and employee.active
+            and employee.user.is_active
+        )
+        if is_active_manager and removing_manager:
+            other_managers = Employee.objects.filter(
+                role=Employee.Role.MANAGER, active=True, user__is_active=True,
+            ).exclude(pk=employee.pk)
+            if not other_managers.exists():
                 raise forms.ValidationError("Keep at least one active manager.")
         return cleaned

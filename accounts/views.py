@@ -1,22 +1,25 @@
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
-from django.contrib.auth.decorators import user_passes_test
-from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.views import LoginView
 from django.core.exceptions import ValidationError
-from django.http import HttpResponse, HttpResponseForbidden
-from django.db.models import Q
-from django.shortcuts import get_object_or_404, redirect, render
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import PasswordChangeForm
 from django.db import transaction
+from django.db.models import Q
+from django.http import HttpResponseForbidden
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST, require_http_methods
 
+from .forms import (
+    CustomerAuthenticationForm,
+    CustomerProfileForm,
+    CustomerRegistrationForm,
+    EmployeeCreationForm,
+    EmployeeUpdateForm,
+)
 from .models import Customer, Employee, StaffAction
-from .forms import (CustomerAuthenticationForm, CustomerProfileForm, CustomerRegistrationForm,
-                    EmployeeCreationForm, EmployeeUpdateForm)
 
 
 def active_employee(user):
@@ -98,11 +101,7 @@ def customer_profile(request):
 @require_POST
 def logout_view(request):
     logout(request)
-    return redirect("/")
-
-
-def placeholder(request, *args, **kwargs):
-    return HttpResponse("Page under construction")
+    return redirect("catalogue:home")
 
 
 @staff_required
@@ -155,9 +154,12 @@ def employee_create(request):
                 return HttpResponseForbidden("Only managers can manage employees.")
             if form.is_valid():
                 user = form.save()
-                StaffAction.objects.create(employee=request.user.employee_profile,
-                                           action_type="employee_created", object_ref=str(user.employee_profile.pk),
-                                           detail=f"Created {user.username} with role {user.employee_profile.role}.")
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="employee_created",
+                    object_ref=str(user.employee_profile.pk),
+                    detail=f"Created {user.username} with role {user.employee_profile.role}.",
+                )
                 messages.success(request, "Employee account created.")
                 return redirect("employee_list")
     return render(request, "accounts/employee_form.html", {"form": form, "title": "Create employee"})
@@ -179,9 +181,12 @@ def employee_update(request, pk):
             employee.user.is_active = employee.active
             employee.user.save(update_fields=("is_active",))
             if (old_role, old_active) != (employee.role, employee.active):
-                StaffAction.objects.create(employee=request.user.employee_profile,
-                                           action_type="employee_updated", object_ref=str(employee.pk),
-                                           detail=f"Role {old_role} → {employee.role}; active {old_active} → {employee.active}.")
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="employee_updated",
+                    object_ref=str(employee.pk),
+                    detail=f"Role {old_role} → {employee.role}; active {old_active} → {employee.active}.",
+                )
             messages.success(request, "Employee account updated.")
             return redirect("employee_list")
     return render(request, "accounts/employee_form.html", {"form": form, "title": f"Manage {employee.user.username}"})

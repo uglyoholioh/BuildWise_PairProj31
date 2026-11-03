@@ -2,14 +2,17 @@ from decimal import Decimal
 
 from django import forms
 
-from .models import Game, GameSettingSupport, QuestionnaireResponse
+from .models import Game, GameSettingSupport
 
 
 class SupportedGamesField(forms.ModelMultipleChoiceField):
     def clean(self, value):
         for game_id in value or []:
             text = str(game_id)
-            if not text.isascii() or not text.isdecimal() or len(text) > 19 or not 0 < int(text) <= 9223372036854775807:
+            if not text.isascii() or not text.isdecimal() or len(text) > 19:
+                raise forms.ValidationError("Choose valid supported games.")
+            # Reject values outside SQLite's signed 64-bit IDs before the ORM query.
+            if not 0 < int(text) <= 9223372036854775807:
                 raise forms.ValidationError("Choose valid supported games.")
         return super().clean(value)
 
@@ -30,7 +33,10 @@ class QuestionnaireForm(forms.Form):
             selected = self.data.getlist("games") if hasattr(self.data, "getlist") else self.data.get("games", [])
             selected = selected if isinstance(selected, (list, tuple)) else [selected]
         else:
-            selected = self.initial.get("games", [str(row.game_id) for row in initial_response.game_settings.all()] if initial_response else [])
+            previous_games = []
+            if initial_response:
+                previous_games = list(initial_response.game_settings.values_list("game_id", flat=True))
+            selected = self.initial.get("games", previous_games)
         if initial_response:
             self.fields["max_spend"].initial = initial_response.max_spend
             self.fields["perf_level"].initial = initial_response.perf_level
@@ -45,9 +51,7 @@ class QuestionnaireForm(forms.Form):
         for game in games:
             supported = list(game.supported_settings.order_by("resolution", "graphics_preset"))
             resolutions = sorted({row.resolution for row in supported})
-            default_setting = next(
-                (row for row in supported if row.resolution == resolutions[0]), supported[0]
-            )
+            default_setting = supported[0]
             prefix = f"game_{game.pk}"
             previous = (
                 initial_response.game_settings.filter(game=game).first()
