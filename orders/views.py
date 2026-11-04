@@ -146,9 +146,17 @@ def cart_add(request):
         return redirect("orders:cart")
     quantity = 1
     snapshot = _build_snapshot(items)
+    source_preset = configuration if kind == "preset" else Configuration.objects.filter(
+        pk=build.get("preset_id"),
+    ).first()
+    if source_preset:
+        snapshot.update(source_preset_id=source_preset.pk, source_preset_name=source_preset.name,
+                        customised_from_preset=kind == "custom")
     key = f"preset:{configuration_id}" if configuration_id else "custom:" + ",".join(
         f"{part['component_id']}x{part['quantity']}" for part in sorted(snapshot["components"], key=lambda value: value["component_id"])
     )
+    if kind == "custom":
+        key += f":source:{source_preset.pk if source_preset else 'none'}"
     lines = request.session.get("cart", [])
     existing = next((line for line in lines if line.get("key") == key), None)
     if existing:
@@ -271,6 +279,9 @@ def checkout(request):
                         }}
                     else:
                         snapshot = _build_snapshot(row["items"])
+                        for field in ("source_preset_id", "source_preset_name", "customised_from_preset"):
+                            if field in line.get("custom_snapshot", {}):
+                                snapshot[field] = line["custom_snapshot"][field]
                     order_line = OrderLine.objects.create(
                         order=order, kind="accessory" if is_accessory else "build",
                         name=row["accessory"].name if is_accessory else line["name"],
@@ -304,6 +315,7 @@ def order_detail(request, pk):
         Order.objects.select_related("shipment").prefetch_related(
             "lines__pcs__reservations__component",
             "lines__pcs__substitutions",
+            "lines__pcs__review",
             "lines__pcs__substitutions__original_component",
             "lines__pcs__substitutions__replacement_component",
             "lines__pcs__quality_checks__employee",

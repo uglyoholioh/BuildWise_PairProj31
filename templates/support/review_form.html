@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Review your PC | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'orders:order_detail' pc.order_line.order_id %}">Back to my order</a></p>
+<h1 class="h3">Review {{ pc.order_line.name }}</h1>
+<p>PC #{{ pc.pk }} · One review per delivered PC. Your rating, written feedback and purchased specifications will be public.</p>
+<h2 class="h5">Purchased specifications</h2>
+{% if pc.order_line.custom_snapshot.components %}{% include "orders/parts_snapshot.html" with parts=pc.approved_parts %}{% else %}{% include "orders/parts_snapshot.html" with parts=pc.order_line.custom_snapshot.components %}{% endif %}
+<form method="post" class="card card-body">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button class="btn btn-primary align-self-start" type="submit">Publish review</button>
+</form>
+{% endblock %}

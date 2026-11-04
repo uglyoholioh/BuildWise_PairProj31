@@ -1,13 +1,67 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Customer, StaffAction
 from accounts.views import staff_required
-from .forms import CustomerMessageForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
-from .models import SupportMessage, SupportRequest
+from orders.models import Order, PurchasedPC
+from .forms import CustomerMessageForm, ReviewForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
+from .models import Review, SupportMessage, SupportRequest
+
+
+def review_list(request):
+    reviews = Review.objects.select_related("purchased_pc__order_line").order_by("-created_at", "-pk")
+    page = Paginator(reviews, 12).get_page(request.GET.get("page"))
+    return render(request, "support/review_list.html", {"page_obj": page})
+
+
+def review_detail(request, pk):
+    review = get_object_or_404(Review.objects.select_related("purchased_pc__order_line"), pk=pk)
+    return render(request, "support/review_detail.html", {"review": review})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def review_create(request, pk):
+    pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"),
+                          pk=pk, order_line__order__customer__user=request.user)
+    order = pc.order_line.order
+    if Review.objects.filter(purchased_pc=pc).exists():
+        messages.info(request, "You have already reviewed this PC.")
+        return redirect("orders:order_detail", pk=order.pk)
+    if not pc.review_eligible:
+        messages.error(request, "Only a delivered PC that has not been cancelled or refunded can be reviewed.")
+        return redirect("orders:order_detail", pk=order.pk)
+    form = ReviewForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            # Match fulfilment's lock order and recheck eligibility at submission.
+            order = get_object_or_404(Order.objects.select_for_update(), pk=order.pk, customer__user=request.user)
+            pc = get_object_or_404(PurchasedPC.objects.select_for_update().select_related("order_line__order"), pk=pk)
+            if not pc.review_eligible:
+                messages.error(request, "This PC is no longer eligible for a review.")
+                return redirect("orders:order_detail", pk=order.pk)
+            line = pc.order_line
+            snapshot = {
+                "name": line.name,
+                "components": pc.approved_parts if line.custom_snapshot.get("components") else [],
+                "source_preset_name": line.custom_snapshot.get("source_preset_name", line.name if line.configuration_id else ""),
+                "customised_from_preset": line.custom_snapshot.get("customised_from_preset", False),
+                "has_substitutions": pc.substitutions.filter(status="accepted").exists(),
+            }
+            review, created = Review.objects.get_or_create(purchased_pc=pc, defaults={
+                "customer": order.customer, "rating": form.cleaned_data["rating"],
+                "text": form.cleaned_data["text"], "build_snapshot": snapshot,
+            })
+        if created:
+            messages.success(request, "Your review has been published.")
+        else:
+            messages.info(request, "You have already reviewed this PC.")
+        return redirect("support:review_detail", pk=review.pk)
+    return render(request, "support/review_form.html", {"pc": pc, "form": form})
 
 
 def placeholder(request, *args, **kwargs):

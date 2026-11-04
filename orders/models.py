@@ -34,6 +34,12 @@ class PurchasedPC(models.Model):
     refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
 
     @property
+    def review_eligible(self):
+        order = self.order_line.order
+        return (order.status == "delivered" and order.payment_status == "paid"
+                and self.status == "quality_passed" and self.refund_amount == 0)
+
+    @property
     def approved_parts(self):
         from .allocations import approved_pc_parts
         return approved_pc_parts(self)

@@ -15,6 +15,11 @@
     {% for proposal in pc.substitutions.all %}
       {% include "orders/substitution_review.html" %}
     {% endfor %}
+    {% if pc.review %}
+      <p><a href="{% url 'support:review_detail' pc.review.pk %}">Your review: {{ pc.review.rating }} / 5</a></p>
+    {% elif pc.review_eligible %}
+      <a class="btn btn-outline-primary btn-sm" href="{% url 'support:review_create' pc.pk %}">Review this PC</a>
+    {% endif %}
   </article>{% empty %}{% endfor %}
 </div></section>{% empty %}<div class="alert alert-info">No order lines are available.</div>{% endfor %}
 <h2 class="h5">Order timeline</h2><ul>{% for event in order.status_history.all %}<li>{{ event.created_at }} · {{ event.to_status }}{% if event.note %} · {{ event.note }}{% endif %}</li>{% empty %}<li>No updates yet.</li>{% endfor %}</ul>
