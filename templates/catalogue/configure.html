@@ -7,7 +7,6 @@
   {% csrf_token %}
   <label class="form-label" for="build-name">Build name</label>
   <input class="form-control mb-3" id="build-name" name="name" maxlength="160" value="{{ name }}">
-  <input type="hidden" name="preset_id" value="{{ preset_id|default:'' }}">
   {% for row in rows %}
   <div class="mb-3">
     <label class="form-label" for="component-{{ row.category }}">{{ row.label }}</label>

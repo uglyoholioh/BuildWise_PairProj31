@@ -10,4 +10,9 @@
 <a class="btn btn-primary" href="{% url 'catalogue:configure' %}?preset={{ row.configuration.pk }}">Customize this build</a>
 {% if row.has_price and row.available_quantity %}<form class="d-inline" method="post" action="{% url 'orders:cart_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="preset"><input type="hidden" name="item_id" value="{{ row.configuration.pk }}"><button class="btn btn-success" type="submit">Add preset to cart</button></form>{% endif %}
 <form class="d-inline" method="post" action="{% url 'recommendations:compare_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="preset"><input type="hidden" name="item_id" value="{{ row.configuration.pk }}"><button class="btn btn-outline-secondary" type="submit">Add to comparison</button></form>
+<section class="mt-4" aria-labelledby="customer-reviews">
+  <h2 class="h4" id="customer-reviews">Customer reviews</h2>
+  <p>Purchased specifications may differ from this preset today. Customised builds are labelled.</p>
+  {% for review in reviews %}{% include "support/review_card.html" %}{% empty %}<p>No customer reviews for this preset yet.</p>{% endfor %}
+</section>
 {% endblock %}

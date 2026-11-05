@@ -1,7 +1,21 @@
 from django import forms
 
 from orders.models import Order
-from .models import SupportRequest
+from .models import Review
+
+
+class ReviewForm(forms.ModelForm):
+    class Meta:
+        model = Review
+        fields = ("rating", "text")
+        labels = {"text": "Written feedback"}
+        widgets = {
+            "rating": forms.Select(
+                choices=[("", "Choose a rating")] + [(value, f"{value} / 5") for value in range(1, 6)],
+                attrs={"class": "form-select"},
+            ),
+            "text": forms.Textarea(attrs={"rows": 5, "class": "form-control"}),
+        }
 
 
 class SupportRequestForm(forms.Form):

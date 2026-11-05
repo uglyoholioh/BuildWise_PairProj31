@@ -1,0 +1,15 @@
+<article class="card mb-3" id="review-{{ review.pk }}">
+  <div class="card-body">
+    <h3 class="h5">{{ review.build_snapshot.name|default:review.purchased_pc.order_line.name }}</h3>
+    <p><strong>{{ review.rating }} / 5</strong> · Verified purchaser · {{ review.created_at }}</p>
+    {% if review.build_snapshot.customised_from_preset %}
+      <p class="badge text-bg-secondary">Customised from {{ review.build_snapshot.source_preset_name }}</p>
+    {% elif review.build_snapshot.source_preset_name %}
+      <p>Purchased preset: {{ review.build_snapshot.source_preset_name }}</p>
+    {% else %}<p>Custom PC</p>{% endif %}
+    <div>{{ review.text|linebreaksbr }}</div>
+    <h4 class="h6 mt-3">Purchased specifications</h4>
+    {% if review.build_snapshot.has_substitutions %}<p class="small">Includes customer-approved component substitutions.</p>{% endif %}
+    {% include "orders/parts_snapshot.html" with parts=review.build_snapshot.components %}
+  </div>
+</article>

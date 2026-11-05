@@ -60,7 +60,7 @@ def configure(request):
                 selected_ids[component.pk] = 1
         session_build = {
             "name": request.POST.get("name", "My custom PC").strip()[:160] or "My custom PC",
-            "preset_id": request.POST.get("preset_id") or None,
+            "preset_id": session_build.get("preset_id"),
             "components": [{"component_id": pk, "quantity": quantity} for pk, quantity in selected_ids.items()],
         }
     components = Component.objects.filter(pk__in=selected_ids, active=True)
@@ -378,6 +378,7 @@ def preset_list(request):
 
 
 def preset_detail(request, pk):
+    from support.models import Review
     configuration = get_object_or_404(
         Configuration.objects.prefetch_related("items__component"),
         pk=pk,
@@ -421,6 +422,10 @@ def preset_detail(request, pk):
             "has_fee": fee is not None,
             "questionnaire": questionnaire,
             "game_needs": game_needs,
+            "reviews": Review.objects.filter(
+                Q(purchased_pc__order_line__configuration=configuration)
+                | Q(purchased_pc__order_line__custom_snapshot__source_preset_id=configuration.pk)
+            ).select_related("purchased_pc__order_line").order_by("-created_at", "-pk"),
         },
     )
 

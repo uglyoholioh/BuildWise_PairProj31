@@ -45,6 +45,47 @@ class CheckoutTests(TestCase):
         self.assertFalse(Order.objects.exists())
         self.assertFalse(Reservation.objects.exists())
 
+    def test_customised_preset_provenance_survives_configurator_cart_checkout_and_review(self):
+        self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
+        chosen = {f"component_{part.category}": part.pk for part in self.configuration.components.all()}
+        unrelated = Configuration.objects.create(name="Unrelated preset", status="published")
+        self.client.post(reverse("catalogue:configure"), {
+            **chosen, "name": "My customised PC", "preset_id": unrelated.pk,
+        })
+        self.assertEqual(self.client.session["current_build"]["preset_id"], self.configuration.pk)
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.force_login(self.user)
+        self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "Test road", "confirm_prices": "on"})
+        order = Order.objects.get()
+        line = order.lines.get()
+        self.assertIsNone(line.configuration)
+        self.assertEqual(line.custom_snapshot["source_preset_id"], self.configuration.pk)
+        self.assertEqual(line.custom_snapshot["source_preset_name"], "Checkout PC")
+        self.assertTrue(line.custom_snapshot["customised_from_preset"])
+        self.assertEqual(len(line.custom_snapshot["components"]), 7)
+        order.status = "delivered"
+        order.save()
+        pc = line.pcs.get()
+        pc.status = "quality_passed"
+        pc.save()
+        self.client.post(reverse("support:review_create", args=[pc.pk]), {"rating": 4, "text": "Custom build feedback"})
+        page = self.client.get(reverse("catalogue:preset_detail", args=[self.configuration.pk]))
+        self.assertContains(page, "Custom build feedback")
+        self.assertContains(page, "Customised from Checkout PC")
+        self.assertNotContains(self.client.get(reverse("catalogue:preset_detail", args=[unrelated.pk])), "Custom build feedback")
+
+    def test_custom_cart_lines_with_different_preset_origins_do_not_merge(self):
+        chosen = {f"component_{part.category}": part.pk for part in self.configuration.components.all()}
+        # A posted hidden ID cannot turn a scratch build into a preset purchase.
+        self.client.post(reverse("catalogue:configure"), {**chosen, "preset_id": self.configuration.pk})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        lines = self.client.session["cart"]
+        self.assertEqual(len(lines), 2)
+        self.assertNotIn("source_preset_id", lines[0]["custom_snapshot"])
+        self.assertEqual(lines[1]["custom_snapshot"]["source_preset_id"], self.configuration.pk)
+
     def test_preset_checkout_creates_paid_order_pc_snapshots_and_reservations(self):
         self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
         cart_line = self.client.session["cart"][0]
@@ -61,6 +102,8 @@ class CheckoutTests(TestCase):
         self.assertEqual(PurchasedPC.objects.filter(order_line__order=order).count(), 2)
         self.assertEqual(Reservation.objects.filter(purchased_pc__order_line__order=order, status=Reservation.Status.RESERVED).count(), 14)
         self.assertEqual(order.lines.get().custom_snapshot["components"][0]["price"], "100.00")
+        self.assertEqual(order.lines.get().custom_snapshot["source_preset_id"], self.configuration.pk)
+        self.assertFalse(order.lines.get().custom_snapshot["customised_from_preset"])
         self.assertEqual(self.client.session["cart"], [])
         self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road"})
         self.assertEqual(Order.objects.count(), 1)

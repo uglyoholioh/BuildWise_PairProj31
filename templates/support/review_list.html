@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Customer builds and reviews | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3">Customer builds and reviews</h1>
+<p>Reviews from customers who received their PCs. Specifications describe the purchased build and may differ from presets sold today.</p>
+{% for message in messages %}<div class="alert alert-info" role="status">{{ message }}</div>{% endfor %}
+{% if user.is_authenticated %}<p><a href="{% url 'orders:order_list' %}">Open my orders to review a delivered PC</a></p>{% endif %}
+{% for review in page_obj %}
+  {% include "support/review_card.html" %}
+{% empty %}<p>No customer reviews yet.</p>{% endfor %}
+{% if page_obj.has_other_pages %}
+<nav aria-label="Review pages">
+  {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+  <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}
