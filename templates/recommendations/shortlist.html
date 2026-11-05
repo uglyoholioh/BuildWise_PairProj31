@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}My shortlist | BuildWise{% endblock %}
+{% block content %}
+<h1 class="h3">My shortlist</h1>
+<p>Saved builds belong to your account. Reopening replaces the current unfinished build in this browser; your saved copy stays unchanged.</p>
+{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
+<div class="d-flex gap-2 mb-4">
+  <a class="btn btn-outline-primary" href="{% url 'catalogue:configure' %}">Continue current build</a>
+  <a class="btn btn-outline-secondary" href="{% url 'recommendations:compare' %}">Compare selected builds</a>
+</div>
+<p>Add up to three builds to comparison. Prices, stock and compatibility are checked again when you reopen or compare.</p>
+{% for build in builds %}
+<article class="card mb-3" id="saved-build-{{ build.pk }}">
+  <div class="card-body">
+    <h2 class="h5">{{ build.name }}</h2>
+    <p class="text-body-secondary">Saved {{ build.created_at }}</p>
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post" action="{% url 'recommendations:shortlist_reopen' build.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Reopen</button></form>
+      <form method="post" action="{% url 'recommendations:compare_add' %}">
+        {% csrf_token %}<input type="hidden" name="kind" value="shortlist"><input type="hidden" name="item_id" value="{{ build.pk }}">
+        <button class="btn btn-outline-secondary" type="submit">Add to comparison</button>
+      </form>
+      <form method="post" action="{% url 'recommendations:shortlist_remove' build.pk %}">{% csrf_token %}<button class="btn btn-outline-danger" type="submit">Remove saved build</button></form>
+    </div>
+  </div>
+</article>
+{% empty %}<p>No saved builds yet. Open the configurator, choose components, then select “Save to shortlist”. Incomplete builds can be saved too.</p>{% endfor %}
+{% endblock %}

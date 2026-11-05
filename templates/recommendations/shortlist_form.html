@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Save build | BuildWise{% endblock %}
+{% block content %}
+<p><a href="{% url 'catalogue:configure' %}">Back to current build</a></p>
+<h1 class="h3">Save build to shortlist</h1>
+<p>Save a named copy of your current selections to your account. You can reopen incomplete builds later. Saving does not reserve stock or lock prices.</p>
+<form method="post" class="card card-body">
+  {% csrf_token %}{{ form.as_p }}
+  <button class="btn btn-primary align-self-start" type="submit">Save named build</button>
+</form>
+{% endblock %}

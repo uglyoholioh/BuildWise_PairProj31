@@ -2,6 +2,7 @@
 {% block title %}Configure a PC | BuildWise{% endblock %}
 {% block content %}
 <h1 class="h3">Configure a PC</h1>
+{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 <p class="text-body-secondary">Choose one active component per category. Your selections are kept in this browser session.</p>
 <form method="post" class="card card-body mb-4">
   {% csrf_token %}
@@ -12,12 +13,14 @@
     <label class="form-label" for="component-{{ row.category }}">{{ row.label }}</label>
     <select class="form-select" id="component-{{ row.category }}" name="component_{{ row.category }}">
       <option value="">Choose {{ row.label|lower }}</option>
-      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if choice.issues %} ({{ choice.issues|join:"; " }}){% endif %}</option>{% endfor %}
+      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if not choice.component.active %} (No longer available){% endif %}{% if choice.issues %} ({{ choice.issues|join:"; " }}){% endif %}</option>{% endfor %}
     </select>
   </div>
   {% endfor %}
   <p class="small text-body-secondary">Compatible choices appear first. Conflicting choices remain selectable so you can resolve the issue without losing other selections.</p>
   <button class="btn btn-primary align-self-start" type="submit">Update build</button>
+  <button class="btn btn-outline-primary align-self-start mt-2" type="submit" name="action" value="shortlist">Save to shortlist</button>
+  {% if not user.is_authenticated %}<p class="small mt-2">You will be asked to sign in before saving to your account.</p>{% endif %}
 </form>
 {% if items %}<h2 class="h5">Quotation</h2><ul>{% for item in items %}<li>{{ item.component.get_category_display }}: {{ item.component.brand }} {{ item.component.model }} × {{ item.quantity }} — ${{ item.component.price }}</li>{% endfor %}</ul>{% endif %}
 {% if fee %}<p>Assembly and testing: ${{ fee.fee_amount }}</p>{% endif %}
