@@ -2,9 +2,13 @@
 import shutil
 import unittest
 
+from django.contrib.auth.models import User
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.urls import reverse
 
-from .models import Game, GameSettingSupport, QuestionnaireResponse
+from accounts.models import Customer
+from catalogue.models import Component
+from .models import Game, GameSettingSupport, QuestionnaireResponse, ShortlistItem
 
 try:
     from playwright.sync_api import sync_playwright
@@ -44,3 +48,47 @@ class QuestionnaireBrowserTests(StaticLiveServerTestCase):
             browser.close()
         self.assertEqual(QuestionnaireResponse.objects.count(), 1)
         self.assertEqual(QuestionnaireResponse.objects.get().game_settings.count(), 2)
+
+
+@unittest.skipUnless(sync_playwright and shutil.which('chromium'), 'Requires Playwright and Chromium')
+class ShortlistBrowserTests(StaticLiveServerTestCase):
+    def test_guest_signs_in_saves_named_drafts_reopens_compares_and_removes(self):
+        user = User.objects.create_user("shortlistbuyer", password="BrowserTestPass!482")
+        Customer.objects.create(user=user, name="Buyer", email="buyer@example.test")
+        cpu = Component.objects.create(category=Component.Category.CPU, brand="Example", model="Draft CPU", socket="AM5", price=100)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(executable_path=shutil.which('chromium'), headless=True,
+                                                 args=['--no-sandbox'])
+            page = browser.new_page()
+            page.goto(self.live_server_url + reverse("catalogue:configure"))
+            page.get_by_label("Build name", exact=True).fill("Guest draft")
+            page.get_by_label("CPU", exact=True).select_option(str(cpu.pk))
+            page.get_by_role("button", name="Save to shortlist", exact=True).click()
+            page.get_by_label("Username", exact=True).fill("shortlistbuyer")
+            page.get_by_label("Password", exact=True).fill("BrowserTestPass!482")
+            page.get_by_role("button", name="Sign in", exact=True).click()
+            self.assertEqual(page.get_by_label("Saved build name:", exact=True).input_value(), "Guest draft")
+            page.get_by_label("Saved build name:", exact=True).fill("Quiet PC option")
+            page.get_by_role("button", name="Save named build", exact=True).click()
+            self.assertTrue(page.get_by_role("heading", name="Quiet PC option", exact=True).is_visible())
+            page.get_by_role("button", name="Reopen", exact=True).click()
+            self.assertEqual(page.get_by_label("Build name", exact=True).input_value(), "Quiet PC option")
+            self.assertEqual(page.get_by_label("CPU", exact=True).input_value(), str(cpu.pk))
+            self.assertTrue(page.get_by_role("heading", name="Needs attention", exact=True).is_visible())
+            page.get_by_label("Build name", exact=True).fill("Budget PC option")
+            page.get_by_role("button", name="Save to shortlist", exact=True).click()
+            page.get_by_role("button", name="Save named build", exact=True).click()
+            quiet = page.locator("article", has=page.get_by_role("heading", name="Quiet PC option", exact=True))
+            quiet.get_by_role("button", name="Add to comparison", exact=True).click()
+            page.get_by_role("link", name="Choose from my shortlist", exact=True).click()
+            budget = page.locator("article", has=page.get_by_role("heading", name="Budget PC option", exact=True))
+            budget.get_by_role("button", name="Add to comparison", exact=True).click()
+            self.assertIn("Quiet PC option", page.locator("table thead").inner_text())
+            self.assertIn("Budget PC option", page.locator("table thead").inner_text())
+            page.get_by_role("link", name="Choose from my shortlist", exact=True).click()
+            quiet = page.locator("article", has=page.get_by_role("heading", name="Quiet PC option", exact=True))
+            quiet.get_by_role("button", name="Remove saved build", exact=True).click()
+            self.assertEqual(page.get_by_role("heading", name="Quiet PC option", exact=True).count(), 0)
+            self.assertTrue(page.get_by_role("heading", name="Budget PC option", exact=True).is_visible())
+            browser.close()
+        self.assertEqual(list(ShortlistItem.objects.values_list("name", flat=True)), ["Budget PC option"])
