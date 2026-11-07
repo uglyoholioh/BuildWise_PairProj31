@@ -261,6 +261,13 @@ def checkout(request):
                 for accessory_id, quantity in requirements["accessory"].items():
                     if available_accessory_quantity(locked_accessories[accessory_id]) < quantity:
                         raise ValueError(f"Not enough stock for {locked_accessories[accessory_id]}.")
+                # A declined simulation must not save customer details or any purchase records.
+                if form.cleaned_data["simulate_payment_failure"]:
+                    form.add_error(None, "Simulated payment was declined. Your cart is unchanged and no order was placed. "
+                                   "Uncheck 'Simulate payment decline' to retry.")
+                    return render(request, "orders/checkout.html", {
+                        "form": form, "lines": preview, "total": total, "invalid": invalid,
+                    })
                 customer.name = form.cleaned_data["name"]
                 customer.delivery_address = form.cleaned_data["delivery_address"]
                 customer.save(update_fields=("name", "delivery_address"))

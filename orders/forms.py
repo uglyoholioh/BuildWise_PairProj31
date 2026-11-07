@@ -9,6 +9,11 @@ from .allocations import expected_pc_quantities
 class CheckoutForm(forms.ModelForm):
     delivery_address = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
     confirm_prices = forms.BooleanField(required=False, label="I have reviewed the current prices")
+    simulate_payment_failure = forms.BooleanField(
+        required=False,
+        label="Simulate payment decline",
+        help_text="Leave unchecked for a successful simulated payment. No real payment is taken.",
+    )
 
     class Meta:
         model = Customer
@@ -18,7 +23,7 @@ class CheckoutForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
-            field.widget.attrs["class"] = "form-control"
+            field.widget.attrs["class"] = "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-control"
 
 
 class HoldPCForm(forms.Form):

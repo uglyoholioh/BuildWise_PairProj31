@@ -45,6 +45,102 @@ class CheckoutTests(TestCase):
         self.assertFalse(Order.objects.exists())
         self.assertFalse(Reservation.objects.exists())
 
+    def test_payment_decline_preserves_mixed_cart_and_details_then_retry_succeeds_once(self):
+        accessory = Accessory.objects.create(name="Mouse", category="Mouse", price=40)
+        StockAdjustment.objects.create(item_type="accessory", accessory=accessory, delta=2,
+                                       reason="Opening stock", created_by=self.employee)
+        self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+        cart = self.client.session["cart"]
+        build = self.client.session["current_build"]
+        stock_count = StockAdjustment.objects.count()
+        data = {"name": "Updated Buyer", "delivery_address": "2 New Road",
+                "confirm_prices": "on", "simulate_payment_failure": "on"}
+
+        for attempt in range(2):
+            with self.subTest(attempt=attempt):
+                response = self.client.post(reverse("orders:checkout"), data)
+                self.assertContains(response, "Simulated payment was declined")
+                self.assertContains(response, "2 New Road")
+                self.assertEqual(response.context["form"]["name"].value(), "Updated Buyer")
+                self.assertEqual(self.client.session["cart"], cart)
+                self.assertEqual(self.client.session["current_build"], build)
+                for model in (Order, OrderLine, PurchasedPC, OrderStatusHistory, Reservation):
+                    self.assertFalse(model.objects.exists())
+                self.assertEqual(StockAdjustment.objects.count(), stock_count)
+                customer = Customer.objects.get(user=self.user)
+                self.assertEqual((customer.name, customer.delivery_address), ("Buyer", "1 Old Road"))
+
+        data.pop("simulate_payment_failure")
+        response = self.client.post(reverse("orders:checkout"), data)
+        order = Order.objects.get()
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        self.assertEqual((order.payment_status, order.total_snapshot), ("paid", Decimal("765.00")))
+        self.assertEqual((order.delivery_name, order.delivery_address), ("Updated Buyer", "2 New Road"))
+        self.assertEqual(order.lines.count(), 2)
+        self.assertEqual(PurchasedPC.objects.count(), 1)
+        self.assertEqual(Reservation.objects.count(), 8)
+        self.assertEqual(OrderStatusHistory.objects.count(), 1)
+        self.assertEqual(self.client.session["cart"], [])
+        self.assertNotIn("current_build", self.client.session)
+
+        # A stale submit for an already-paid cart must return that order, even if decline is selected.
+        session = self.client.session
+        session["cart"] = cart
+        session.save()
+        response = self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
+        self.assertEqual(Order.objects.count(), 1)
+        self.assertEqual(Reservation.objects.count(), 8)
+        self.assertEqual(OrderStatusHistory.objects.count(), 1)
+
+    def test_accessory_only_payment_decline_creates_no_purchase(self):
+        accessory = Accessory.objects.create(name="Keyboard", category="Keyboard", price=60)
+        StockAdjustment.objects.create(item_type="accessory", accessory=accessory, delta=1,
+                                       reason="Opening stock", created_by=self.employee)
+        self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
+        self.client.force_login(self.user)
+        cart = self.client.session["cart"]
+        response = self.client.post(reverse("orders:checkout"), {
+            "name": "Buyer", "delivery_address": "2 New Road", "simulate_payment_failure": "on",
+        })
+        self.assertContains(response, "Simulated payment was declined")
+        self.assertEqual(self.client.session["cart"], cart)
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+
+    def test_payment_retry_rechecks_prices_and_requires_confirmation(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+        data = {"name": "Buyer", "delivery_address": "2 New Road"}
+        self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        Component.objects.filter(category=Component.Category.CPU).update(price=150)
+        response = self.client.post(reverse("orders:checkout"), data, follow=True)
+        self.assertContains(response, "Prices changed. Review the updated total")
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+        self.client.post(reverse("orders:checkout"), {**data, "confirm_prices": "on"})
+        self.assertEqual(Order.objects.get().total_snapshot, Decimal("775.00"))
+
+    def test_payment_retry_rechecks_stock(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.get(reverse("orders:cart"))
+        self.client.force_login(self.user)
+        data = {"name": "Buyer", "delivery_address": "2 New Road"}
+        self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        cpu = Component.objects.get(category=Component.Category.CPU)
+        StockAdjustment.objects.create(item_type="component", component=cpu, delta=-3,
+                                       reason="Stock sold before retry", created_by=self.employee)
+        response = self.client.post(reverse("orders:checkout"), data, follow=True)
+        self.assertContains(response, "Not enough stock")
+        self.assertTrue(self.client.session["cart"])
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+
     def test_customised_preset_provenance_survives_configurator_cart_checkout_and_review(self):
         self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
         chosen = {f"component_{part.category}": part.pk for part in self.configuration.components.all()}
