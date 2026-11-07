@@ -16,8 +16,11 @@ def component_snapshot(component, quantity=1):
     }
 
 
-def approved_pc_parts(purchased_pc):
-    """Replay one-unit approvals for this PC without changing the purchase snapshot."""
+def approved_pc_parts(purchased_pc, proposals=None):
+    """Replay approvals without changing the purchase snapshot.
+
+    Batch readers can supply accepted proposals in decision order to avoid repeated queries.
+    """
     line = purchased_pc.order_line
     parts = [dict(part) for part in line.custom_snapshot.get("components", [])]
     if not parts and line.configuration_id:
@@ -25,7 +28,9 @@ def approved_pc_parts(purchased_pc):
             component_snapshot(item.component, item.quantity)
             for item in line.configuration.items.select_related("component")
         ]
-    for proposal in purchased_pc.substitutions.filter(status="accepted").order_by("decided_at", "pk"):
+    if proposals is None:
+        proposals = purchased_pc.substitutions.filter(status="accepted").order_by("decided_at", "pk")
+    for proposal in proposals:
         original = None
         for part in parts:
             if part["component_id"] == proposal.original_component_id and part["quantity"] > 0:

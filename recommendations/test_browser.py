@@ -9,6 +9,7 @@ from django.urls import reverse
 from accounts.models import Customer
 from catalogue.models import Component
 from .models import Game, GameSettingSupport, QuestionnaireResponse, ShortlistItem
+from .test_accessories import PurchaseHistoryFixture
 
 try:
     from playwright.sync_api import sync_playwright
@@ -92,3 +93,26 @@ class ShortlistBrowserTests(StaticLiveServerTestCase):
             self.assertTrue(page.get_by_role("heading", name="Budget PC option", exact=True).is_visible())
             browser.close()
         self.assertEqual(list(ShortlistItem.objects.values_list("name", flat=True)), ["Budget PC option"])
+
+
+@unittest.skipUnless(sync_playwright and shutil.which('chromium'), 'Requires Playwright and Chromium')
+class AccessorySuggestionBrowserTests(PurchaseHistoryFixture, StaticLiveServerTestCase):
+    def test_guest_sees_purchase_based_suggestions_and_adds_accessory(self):
+        for unused in range(3):
+            self.purchase()
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(executable_path=shutil.which('chromium'), headless=True,
+                                                 args=['--no-sandbox'])
+            page = browser.new_page()
+            page.goto(self.live_server_url + reverse("catalogue:preset_detail", args=[self.preset.pk]))
+            card = page.locator(f"#suggested-accessory-{self.mouse.pk}")
+            self.assertIn("Suggested mouse", card.inner_text())
+            self.assertIn("$20.00", card.inner_text())
+            self.assertIn("3 completed orders", card.inner_text())
+            page.get_by_role("link", name="Customize this build", exact=True).click()
+            self.assertTrue(page.locator(f"#suggested-accessory-{self.mouse.pk}").is_visible())
+            page.locator(f"#suggested-accessory-{self.mouse.pk}").get_by_role("button", name="Add accessory to cart", exact=True).click()
+            page.wait_for_url("**/cart")
+            self.assertIn("Suggested mouse", page.locator("main").inner_text())
+            self.assertIn("$20.00", page.locator("main").inner_text())
+            browser.close()
