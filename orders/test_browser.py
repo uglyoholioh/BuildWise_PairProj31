@@ -1,4 +1,4 @@
-"""Optional customer decision test: requires Playwright and local Chromium."""
+"""Optional checkout and customer decision tests: require Playwright and Chromium."""
 import shutil
 import unittest
 
@@ -8,7 +8,7 @@ from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.urls import reverse
 
 from accounts.models import Customer, Employee
-from catalogue.models import Component
+from catalogue.models import Accessory, Component
 from inventory.models import Reservation, StockAdjustment
 from recommendations.models import Game, GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse
 from .allocations import component_snapshot
@@ -18,6 +18,47 @@ try:
     from playwright.sync_api import sync_playwright
 except ImportError:
     sync_playwright = None
+
+
+@unittest.skipUnless(sync_playwright and shutil.which("chromium"), "Requires Playwright and Chromium")
+class CheckoutBrowserTests(StaticLiveServerTestCase):
+    def test_customer_can_retry_after_simulated_payment_decline(self):
+        employee = Employee.objects.create(user=User.objects.create_user("staff"))
+        user = User.objects.create_user("buyer")
+        Customer.objects.create(user=user, name="Buyer", email="buyer@example.test")
+        accessory = Accessory.objects.create(name="Mouse", category="Mouse", price=40)
+        StockAdjustment.objects.create(item_type="accessory", accessory=accessory, delta=1,
+                                       reason="Opening stock", created_by=employee)
+        self.client.force_login(user)
+        self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(executable_path=shutil.which("chromium"), headless=True,
+                                                 args=["--no-sandbox"])
+            context = browser.new_context()
+            context.add_cookies([{"name": settings.SESSION_COOKIE_NAME,
+                                 "value": self.client.cookies[settings.SESSION_COOKIE_NAME].value,
+                                 "url": self.live_server_url}])
+            page = context.new_page()
+            page.goto(self.live_server_url + reverse("orders:checkout"))
+            page.get_by_label("Name", exact=True).fill("Updated Buyer")
+            page.get_by_label("Delivery address").fill("2 New Road")
+            decline = page.get_by_label("Simulate payment decline", exact=True)
+            self.assertFalse(decline.is_checked())
+            decline.check()
+            page.get_by_role("button", name="Place order", exact=True).click()
+            page.wait_for_url("**/checkout")
+            page.get_by_role("alert").filter(has_text="Simulated payment was declined").wait_for()
+            self.assertEqual(page.get_by_label("Name", exact=True).input_value(), "Updated Buyer")
+            self.assertEqual(page.get_by_label("Delivery address").input_value(), "2 New Road")
+            self.assertTrue(decline.is_checked())
+            decline.uncheck()
+            page.get_by_role("button", name="Place order", exact=True).click()
+            page.wait_for_url("**/orders/*")
+            self.assertIn("Payment simulated successfully", page.locator("body").inner_text())
+            browser.close()
+        order = Order.objects.get()
+        self.assertEqual((order.payment_status, order.delivery_address), ("paid", "2 New Road"))
+        self.assertEqual(Reservation.objects.filter(accessory=accessory).count(), 1)
 
 
 @unittest.skipUnless(sync_playwright and shutil.which("chromium"), "Requires Playwright and Chromium")
