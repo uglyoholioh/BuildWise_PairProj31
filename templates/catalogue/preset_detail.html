@@ -15,4 +15,5 @@
   <p>Purchased specifications may differ from this preset today. Customised builds are labelled.</p>
   {% for review in reviews %}{% include "support/review_card.html" %}{% empty %}<p>No customer reviews for this preset yet.</p>{% endfor %}
 </section>
+{% include "recommendations/accessory_suggestions.html" %}
 {% endblock %}

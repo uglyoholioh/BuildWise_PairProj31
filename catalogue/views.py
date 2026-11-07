@@ -23,6 +23,7 @@ from .forms import (
 from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration, ConfigurationItem
 from .pricing import available_preset_quantity, calculate_pc_price
 from inventory.availability import available_component_quantity
+from recommendations.accessories import accessory_suggestions
 
 
 def placeholder(request, *args, **kwargs):
@@ -111,6 +112,7 @@ def configure(request):
         "rows": rows, "items": items, "issues": issues, "price": price, "fee": fee,
         "available": available, "estimates": estimates, "complete": not issues,
         "completed_builds": request.session.get("completed_builds", []),
+        "accessory_suggestions": accessory_suggestions(items) if not issues else [],
     })
 
 
@@ -427,6 +429,7 @@ def preset_detail(request, pk):
             "has_fee": fee is not None,
             "questionnaire": questionnaire,
             "game_needs": game_needs,
+            "accessory_suggestions": accessory_suggestions(configuration.items.all()),
             "reviews": Review.objects.filter(
                 Q(purchased_pc__order_line__configuration=configuration)
                 | Q(purchased_pc__order_line__custom_snapshot__source_preset_id=configuration.pk)

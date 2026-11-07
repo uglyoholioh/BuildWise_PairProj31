@@ -1,0 +1,28 @@
+{% if accessory_suggestions %}
+<section class="mt-4 mb-4" aria-labelledby="accessory-suggestions-title">
+  <h2 class="h4" id="accessory-suggestions-title">Accessories bought with similar PCs</h2>
+  <p>These accessories were bought alongside similar PCs by at least three customers.
+    Similar builds share the CPU and graphics card and at least five of seven core component categories.
+    Accessories are optional and priced separately from your PC.</p>
+  <div class="row g-3">
+    {% for suggestion in accessory_suggestions %}
+    <div class="col-md-4">
+      <article class="card h-100" id="suggested-accessory-{{ suggestion.accessory.pk }}">
+        <div class="card-body">
+          <p class="text-body-secondary">{{ suggestion.accessory.category }}</p>
+          <h3 class="h5">{{ suggestion.accessory.name }}</h3>
+          <p><strong>${{ suggestion.accessory.price }}</strong></p>
+          <p class="small">Bought with similar PCs in {{ suggestion.purchase_count }} completed orders.</p>
+          <form method="post" action="{% url 'orders:cart_add' %}">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="accessory">
+            <input type="hidden" name="item_id" value="{{ suggestion.accessory.pk }}">
+            <button class="btn btn-outline-primary" type="submit">Add accessory to cart</button>
+          </form>
+        </div>
+      </article>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
