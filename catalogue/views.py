@@ -48,6 +48,7 @@ def configure(request):
         }
     selected_ids = {row["component_id"]: row["quantity"] for row in session_build.get("components", [])}
     if request.method == "POST":
+        previous_quantities = selected_ids
         selected_ids = {}
         for category, label in Component.Category.choices:
             raw_id = request.POST.get(f"component_{category}", "").strip()
@@ -57,22 +58,24 @@ def configure(request):
                 except (ValueError, Component.DoesNotExist):
                     messages.error(request, f"Select an active {label.lower()}.")
                     return redirect("catalogue:configure")
-                selected_ids[component.pk] = 1
+                selected_ids[component.pk] = previous_quantities.get(component.pk, 1)
         session_build = {
             "name": request.POST.get("name", "My custom PC").strip()[:160] or "My custom PC",
             "preset_id": session_build.get("preset_id"),
             "components": [{"component_id": pk, "quantity": quantity} for pk, quantity in selected_ids.items()],
         }
-    components = Component.objects.filter(pk__in=selected_ids, active=True)
+    components = Component.objects.filter(pk__in=selected_ids)
     component_map = {component.pk: component for component in components}
     items = [ConfigurationItem(component=component_map[pk], quantity=quantity) for pk, quantity in selected_ids.items() if pk in component_map]
     issues = check_configuration_components(item.component for item in items)
+    for component_id in selected_ids.keys() - component_map.keys():
+        issues.append(f"Saved component #{component_id} is no longer in the catalogue. Choose a replacement or update the build to remove it.")
     fee = current_assembly_fee()
     price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
+    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items and not issues else 0
     rows = []
     for category, label in Component.Category.choices:
-        choices = list(Component.objects.filter(category=category, active=True).order_by("brand", "model"))
+        choices = list(Component.objects.filter(Q(active=True) | Q(pk__in=selected_ids), category=category).order_by("brand", "model"))
         other_components = [item.component for item in items if item.component.category != category]
         choices.sort(key=lambda component: bool(check_compatibility([*other_components, component])))
         rows.append({
@@ -91,6 +94,8 @@ def configure(request):
             estimates.append({"setting": setting, "fps": predict_temporary_fps(items, setting) if supported else None})
     if request.method == "POST":
         request.session["current_build"] = session_build
+        if request.POST.get("action") == "shortlist":
+            return redirect("recommendations:shortlist_save")
         if request.POST.get("action") == "complete" and not issues and available > 0:
             import uuid
             completed = request.session.get("completed_builds", [])

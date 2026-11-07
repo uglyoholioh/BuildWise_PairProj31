@@ -1,15 +1,16 @@
 from decimal import Decimal
 
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.shortcuts import redirect, render
-from django.views.decorators.http import require_POST
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer
 from catalogue.models import AssemblyFeeSetting, Component, Configuration
 from catalogue.compatibility import check_configuration_components
 from catalogue.pricing import available_preset_quantity, calculate_pc_price
-from .forms import QuestionnaireForm
+from .forms import QuestionnaireForm, ShortlistForm
 from catalogue.models import ConfigurationItem
 from inventory.availability import available_component_quantity
 from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
@@ -18,6 +19,83 @@ from .predictor import predict_temporary_fps
 
 def placeholder(request, *args, **kwargs):
     return render(request, "recommendations/placeholder.html")
+
+
+@login_required
+def shortlist(request):
+    customer = get_object_or_404(Customer, user=request.user)
+    builds = customer.shortlist.order_by("-created_at", "-pk")
+    return render(request, "recommendations/shortlist.html", {"builds": builds})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def shortlist_save(request):
+    customer = get_object_or_404(Customer, user=request.user)
+    build = request.session.get("current_build", {})
+    if not build.get("components"):
+        messages.error(request, "Choose at least one component before saving a build.")
+        return redirect("catalogue:configure")
+    form = ShortlistForm(request.POST if request.method == "POST" else None,
+                         initial={"name": build.get("name", "My PC")})
+    if request.method == "POST" and form.is_valid():
+        saved = form.save(commit=False)
+        saved.customer = customer
+        saved.configuration = Configuration.objects.filter(pk=build.get("preset_id")).first()
+        # Store selections, not a live link to the preset's current component list.
+        saved.custom_snapshot = {"components": build["components"]}
+        saved.save()
+        messages.success(request, "Build saved to your shortlist.")
+        return redirect("recommendations:shortlist")
+    return render(request, "recommendations/shortlist_form.html", {"form": form})
+
+
+def _shortlist_build(saved):
+    components = saved.custom_snapshot.get("components")
+    if components is None:
+        # Older records may contain only a preset link.
+        components = [{"component_id": item.component_id, "quantity": item.quantity}
+                      for item in saved.configuration.items.all()] if saved.configuration_id else []
+    return {"name": saved.name, "preset_id": saved.configuration_id, "components": components}
+
+
+@login_required
+@require_POST
+def shortlist_reopen(request, pk):
+    saved = get_object_or_404(ShortlistItem.objects.select_related("configuration"), pk=pk, customer__user=request.user)
+    request.session["current_build"] = _shortlist_build(saved)
+    messages.info(request, "Saved build reopened. Prices, stock and compatibility have been checked against the current catalogue.")
+    return redirect("catalogue:configure")
+
+
+@login_required
+@require_POST
+def shortlist_remove(request, pk):
+    saved = get_object_or_404(ShortlistItem, pk=pk, customer__user=request.user)
+    saved.delete()
+    request.session["comparison_items"] = [item for item in request.session.get("comparison_items", [])
+        if not (item.get("kind") == "shortlist" and str(item.get("id")) == str(pk))]
+    messages.success(request, "Build removed from your shortlist.")
+    return redirect("recommendations:shortlist")
+
+
+def _comparison_selections(request):
+    """Discard deleted or inaccessible selections before applying the three-build limit."""
+    valid = []
+    for item in request.session.get("comparison_items", []):
+        kind, item_id = item.get("kind"), item.get("id")
+        if kind == "preset":
+            exists = Configuration.objects.filter(pk=item_id, status=Configuration.Status.PUBLISHED).exists()
+        elif kind == "shortlist" and request.user.is_authenticated:
+            exists = ShortlistItem.objects.filter(pk=item_id, customer__user=request.user).exists()
+        elif kind == "custom":
+            exists = any(str(build.get("id")) == str(item_id) for build in request.session.get("completed_builds", []))
+        else:
+            exists = False
+        if exists and item not in valid and len(valid) < 3:
+            valid.append(item)
+    request.session["comparison_items"] = valid
+    return valid
 
 
 def _customer(request):
@@ -205,6 +283,8 @@ def compare_add(request):
     raw_id = request.POST.get("item_id", "")
     try:
         item_id = raw_id if kind == "custom" else int(raw_id)
+        if kind != "custom" and not 0 < item_id <= 9223372036854775807:
+            raise ValueError
     except ValueError:
         messages.error(request, "Choose a valid build to compare.")
         return redirect("recommendations:compare")
@@ -219,7 +299,7 @@ def compare_add(request):
     if not exists:
         messages.error(request, "That build is unavailable to compare.")
     else:
-        selected = request.session.get("comparison_items", [])
+        selected = _comparison_selections(request)
         item = {"kind": kind, "id": item_id}
         if item not in selected:
             if len(selected) >= 3:
@@ -242,7 +322,7 @@ def compare_remove(request):
 
 
 def compare_builds(request):
-    selected = request.session.get("comparison_items", [])[:3]
+    selected = _comparison_selections(request)
     builds = []
     fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
     for selection in selected:
@@ -262,11 +342,7 @@ def compare_builds(request):
             if not saved:
                 continue
             name = saved.name
-            if saved.configuration_id:
-                configuration = saved.configuration
-                items = list(configuration.items.select_related("component"))
-            else:
-                items = _snapshot_items(saved.custom_snapshot)
+            items = _snapshot_items(_shortlist_build(saved))
         elif kind == "custom":
             saved = next((item for item in request.session.get("completed_builds", []) if str(item.get("id")) == str(item_id)), None)
             if not saved:
@@ -276,13 +352,18 @@ def compare_builds(request):
         else:
             continue
         issues = check_configuration_components(item.component for item in items)
+        if kind in ("shortlist", "custom"):
+            snapshot = _shortlist_build(saved) if kind == "shortlist" else saved
+            missing = {part["component_id"] for part in snapshot.get("components", [])} - {item.component_id for item in items}
+            if missing:
+                issues.append("Some saved components are no longer in the catalogue. Reopen the build to choose replacements.")
         price = None
         if fee and not issues:
             price = calculate_pc_price(items, fee.fee_amount)
         available = min(
             (available_component_quantity(item.component) // item.quantity for item in items),
             default=0,
-        ) if items else 0
+        ) if items and not issues else 0
         by_category = {}
         for item in items:
             label = item.component.get_category_display()

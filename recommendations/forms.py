@@ -2,7 +2,15 @@ from decimal import Decimal
 
 from django import forms
 
-from .models import Game, GameSettingSupport
+from .models import Game, GameSettingSupport, ShortlistItem
+
+
+class ShortlistForm(forms.ModelForm):
+    class Meta:
+        model = ShortlistItem
+        fields = ("name",)
+        labels = {"name": "Saved build name"}
+        widgets = {"name": forms.TextInput(attrs={"class": "form-control"})}
 
 
 class SupportedGamesField(forms.ModelMultipleChoiceField):

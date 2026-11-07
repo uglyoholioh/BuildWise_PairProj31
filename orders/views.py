@@ -51,6 +51,8 @@ def _cart_build(row):
         configuration = None
         name = row.get("name", "Custom PC")
     issues = check_configuration_components(item.component for item in items)
+    if row.get("kind") != "preset" and len(items) != len(row.get("custom_snapshot", {}).get("components", [])):
+        issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
     return configuration, items, issues
 
 
@@ -139,6 +141,8 @@ def cart_add(request):
         messages.error(request, "Choose a valid build to add to the cart.")
         return redirect("orders:cart")
     issues = check_configuration_components(item.component for item in items)
+    if kind == "custom" and len(items) != len(build.get("components", [])):
+        issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
     available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0)
     fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
     if issues or not items or not available or not fee:
