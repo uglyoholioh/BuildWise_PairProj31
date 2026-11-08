@@ -8,6 +8,7 @@
     {% for suggestion in accessory_suggestions %}
     <div class="col-md-4">
       <article class="card h-100" id="suggested-accessory-{{ suggestion.accessory.pk }}">
+        {% if suggestion.accessory.image %}<img src="{{ suggestion.accessory.image }}" alt="{{ suggestion.accessory.name }}" loading="lazy" class="card-img-top p-3" style="height: 160px; object-fit: contain">{% endif %}
         <div class="card-body">
           <p class="text-body-secondary">{{ suggestion.accessory.category }}</p>
           <h3 class="h5">{{ suggestion.accessory.name }}</h3>
