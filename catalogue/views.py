@@ -335,6 +335,10 @@ def preset_list(request):
     query = Configuration.objects.filter(
         status=Configuration.Status.PUBLISHED
     ).prefetch_related("items__component").order_by("name")
+    has_published_presets = query.exists()
+    demo_presets = [] if has_published_presets else Configuration.objects.filter(
+        status=Configuration.Status.DRAFT, name__startswith="[Demo]"
+    ).prefetch_related("items__component").order_by("name")
     presets, fee = _preset_rows(query)
     min_price = request.GET.get("min_price", "").strip()
     max_price = request.GET.get("max_price", "").strip()
@@ -353,11 +357,12 @@ def preset_list(request):
         item.component.ml_tier
         for row in presets
         for item in row["configuration"].items.all()
-        if item.component.ml_tier
+        if item.component.category == Component.Category.GPU and item.component.ml_tier
     })
     if tier:
         presets = [row for row in presets if any(
-            item.component.ml_tier == tier for item in row["configuration"].items.all()
+            item.component.category == Component.Category.GPU and item.component.ml_tier == tier
+            for item in row["configuration"].items.all()
         )]
     if availability == "in_stock":
         presets = [row for row in presets if row["available_quantity"] > 0]
@@ -372,6 +377,8 @@ def preset_list(request):
         "catalogue/preset_list.html",
         {
             "presets": presets,
+            "demo_presets": demo_presets,
+            "has_published_presets": has_published_presets,
             "assembly_fee": fee.fee_amount if fee else None,
             "has_fee": fee is not None,
             "min_price": min_price,

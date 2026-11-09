@@ -467,6 +467,23 @@ class PresetBrowseTests(TestCase):
         self.assertContains(response, "Low Tier")
         self.assertNotContains(response, "High Tier")
 
+    def test_demo_drafts_are_previews_only_when_no_published_presets_exist(self):
+        self.create_build("[Demo] Sample PC", status=Configuration.Status.DRAFT)
+        self.create_build("Private Staff Draft", status=Configuration.Status.DRAFT)
+
+        response = self.client.get(reverse("catalogue:preset_list"))
+
+        self.assertContains(response, "Sample · not for sale")
+        self.assertContains(response, "Example component selection")
+        self.assertContains(response, "Sample PC")
+        self.assertNotContains(response, "Private Staff Draft")
+        self.assertNotContains(response, "View &amp; customise")
+
+        self.create_build("Published PC")
+        response = self.client.get(reverse("catalogue:preset_list"))
+        self.assertContains(response, "Published PC")
+        self.assertNotContains(response, "Sample · not for sale")
+
 
 class AccessoryBrowseTests(TestCase):
     def test_active_accessories_can_be_searched_and_filtered_with_stock(self):

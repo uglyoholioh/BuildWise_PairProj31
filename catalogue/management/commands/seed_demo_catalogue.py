@@ -21,10 +21,16 @@ class Command(BaseCommand):
                 **identity,
                 defaults={key: value for key, value in row.items() if key != "key"},
             )
+            if not components[row["key"]].image and row.get("image"):
+                components[row["key"]].image = row["image"]
+                components[row["key"]].save(update_fields=["image"])
         for row in data["accessories"]:
-            Accessory.objects.get_or_create(
+            accessory, _ = Accessory.objects.get_or_create(
                 name=row["name"], defaults={key: value for key, value in row.items() if key != "name"}
             )
+            if not accessory.image and row.get("image"):
+                accessory.image = row["image"]
+                accessory.save(update_fields=["image"])
         for row in data["configurations"]:
             configuration, _ = Configuration.objects.update_or_create(
                 name=row["name"],
