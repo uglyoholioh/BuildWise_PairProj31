@@ -7,47 +7,104 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-      <a class="navbar-brand" href="/">BuildWise</a>
-      <a class="nav-link text-light ms-3" href="{% url 'catalogue:preset_list' %}">PC presets</a>
-      <a class="nav-link text-light ms-2" href="{% url 'catalogue:accessory_list' %}">Accessories</a>
-      <a class="nav-link text-light ms-2" href="{% url 'recommendations:questionnaire' %}">Find my build</a>
-      <a class="nav-link text-light ms-2" href="{% url 'recommendations:compare' %}">Compare builds</a>
-      <a class="nav-link text-light ms-2" href="{% url 'support:review_list' %}">Customer reviews</a>
-      <a class="nav-link text-light ms-2" href="{% url 'orders:cart' %}">Cart</a>
-      {% if user.is_authenticated %}
-      {% if user.is_active and user.employee_profile.active %}
-      <a class="nav-link text-light ms-3" href="{% url 'catalogue:component_list' %}">Components</a>
-      <a class="nav-link text-light ms-2" href="{% url 'catalogue:accessory_manage_list' %}">Accessories</a>
-      <a class="nav-link text-light ms-2" href="{% url 'catalogue:compatibility_rules' %}">Compatibility</a>
-      <a class="nav-link text-light ms-2" href="{% url 'catalogue:preset_manage_list' %}">Presets</a>
-      <a class="nav-link text-light ms-2" href="{% url 'inventory:inventory_dashboard' %}">Inventory</a>
-      <a class="nav-link text-light ms-2" href="{% url 'orders:order_queue' %}">Orders</a>
-      <a class="nav-link text-light ms-2" href="{% url 'accounts:customer_list' %}">Customers</a>
-      <a class="nav-link text-light ms-2" href="{% url 'support:staff_request_list' %}">Support</a>
-      {% if user.employee_profile.role == "manager" %}
-      <a class="nav-link text-light ms-2" href="{% url 'employee_list' %}">Employees</a>
-      <a class="nav-link text-light ms-2" href="{% url 'catalogue:assembly_fee' %}">Assembly fee</a>
-      {% endif %}
+  {% with current=request.resolver_match.url_name section=request.resolver_match.namespace %}
+  <nav class="navbar navbar-expand-xl bg-dark border-bottom border-primary border-3 shadow-sm py-3" data-bs-theme="dark" aria-label="Main navigation">
+    <div class="container-fluid px-lg-4 gap-2">
+      {% if user.is_authenticated and user.is_active and user.employee_profile.active %}
+      <a class="navbar-brand fw-semibold d-flex align-items-center gap-2 me-4" href="{% url 'inventory:inventory_dashboard' %}">
+        BuildWise <span class="badge rounded-pill text-bg-primary fw-normal small">Staff</span>
+      </a>
       {% else %}
-      <a class="nav-link text-light ms-3" href="{% url 'accounts:profile' %}">My account</a>
-      <a class="nav-link text-light ms-2" href="{% url 'orders:order_list' %}">My orders</a>
-      <a class="nav-link text-light ms-2" href="{% url 'recommendations:shortlist' %}">My shortlist</a>
-      <a class="nav-link text-light ms-2" href="{% url 'support:request_list' %}">Support</a>
+      <a class="navbar-brand fw-semibold me-4" href="{% url 'catalogue:preset_list' %}">BuildWise</a>
       {% endif %}
-      <form class="ms-auto" method="post" action="{% url 'accounts:logout' %}">
-        {% csrf_token %}
-        <button class="btn btn-outline-light btn-sm" type="submit">Sign out</button>
-      </form>
-      {% else %}
-      <a class="nav-link text-light ms-3" href="{% url 'accounts:login' %}">Sign in</a>
-      <a class="btn btn-outline-light btn-sm ms-2" href="{% url 'accounts:register' %}">Create account</a>
-      {% endif %}
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavigation" aria-controls="mainNavigation" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="mainNavigation">
+        <ul class="navbar-nav me-auto gap-xl-1 py-3 py-xl-0">
+          {% if user.is_authenticated and user.is_active and user.employee_profile.active %}
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if section == 'inventory' %}active bg-secondary bg-opacity-25{% endif %}" {% if section == 'inventory' %}aria-current="page"{% endif %} href="{% url 'inventory:inventory_dashboard' %}">Inventory</a></li>
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if section == 'orders' %}active bg-secondary bg-opacity-25{% endif %}" {% if section == 'orders' %}aria-current="page"{% endif %} href="{% url 'orders:order_queue' %}">Orders</a></li>
+          <li class="nav-item dropdown">
+            <button class="nav-link dropdown-toggle px-3 rounded {% if section == 'catalogue' and current != 'assembly_fee' %}active bg-secondary bg-opacity-25{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Catalogue</button>
+            <ul class="dropdown-menu shadow border-secondary-subtle">
+              <li><h6 class="dropdown-header">Products &amp; configuration</h6></li>
+              <li><a class="dropdown-item {% if 'component' in current %}active{% endif %}" {% if 'component' in current %}aria-current="page"{% endif %} href="{% url 'catalogue:component_list' %}">Components</a></li>
+              <li><a class="dropdown-item {% if 'accessory' in current %}active{% endif %}" {% if 'accessory' in current %}aria-current="page"{% endif %} href="{% url 'catalogue:accessory_manage_list' %}">Accessories</a></li>
+              <li><a class="dropdown-item {% if 'preset' in current %}active{% endif %}" {% if 'preset' in current %}aria-current="page"{% endif %} href="{% url 'catalogue:preset_manage_list' %}">Presets</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item {% if 'compatibility' in current %}active{% endif %}" {% if 'compatibility' in current %}aria-current="page"{% endif %} href="{% url 'catalogue:compatibility_rules' %}">Compatibility</a></li>
+            </ul>
+          </li>
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if current == 'customer_list' or current == 'customer_detail' %}active bg-secondary bg-opacity-25{% endif %}" {% if current == 'customer_list' or current == 'customer_detail' %}aria-current="page"{% endif %} href="{% url 'accounts:customer_list' %}">Customers</a></li>
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if current == 'staff_request_list' or current == 'staff_request_detail' %}active bg-secondary bg-opacity-25{% endif %}" {% if current == 'staff_request_list' or current == 'staff_request_detail' %}aria-current="page"{% endif %} href="{% url 'support:staff_request_list' %}">Support</a></li>
+          {% if user.employee_profile.role == 'manager' %}
+          <li class="nav-item dropdown">
+            <button class="nav-link dropdown-toggle px-3 rounded {% if 'employee' in current or current == 'assembly_fee' %}active bg-secondary bg-opacity-25{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Management</button>
+            <ul class="dropdown-menu shadow border-secondary-subtle">
+              <li><a class="dropdown-item {% if 'employee' in current %}active{% endif %}" {% if 'employee' in current %}aria-current="page"{% endif %} href="{% url 'employee_list' %}">Employees</a></li>
+              <li><a class="dropdown-item {% if current == 'assembly_fee' %}active{% endif %}" {% if current == 'assembly_fee' %}aria-current="page"{% endif %} href="{% url 'catalogue:assembly_fee' %}">Assembly fee</a></li>
+            </ul>
+          </li>
+          {% endif %}
+          {% else %}
+          <li class="nav-item dropdown">
+            <button class="nav-link dropdown-toggle px-3 rounded {% if current == 'home' or current == 'preset_list' or current == 'preset_detail' or current == 'accessory_list' %}active bg-secondary bg-opacity-25{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Shop</button>
+            <ul class="dropdown-menu shadow border-secondary-subtle">
+              <li><h6 class="dropdown-header">PCs &amp; accessories</h6></li>
+              <li><a class="dropdown-item {% if current == 'home' or current == 'preset_list' or current == 'preset_detail' %}active{% endif %}" {% if current == 'home' or current == 'preset_list' or current == 'preset_detail' %}aria-current="page"{% endif %} href="{% url 'catalogue:preset_list' %}">PC presets</a></li>
+              <li><a class="dropdown-item {% if current == 'accessory_list' %}active{% endif %}" {% if current == 'accessory_list' %}aria-current="page"{% endif %} href="{% url 'catalogue:accessory_list' %}">Accessories</a></li>
+            </ul>
+          </li>
+          <li class="nav-item dropdown">
+            <button class="nav-link dropdown-toggle px-3 rounded {% if section == 'recommendations' or current == 'configure' %}active bg-secondary bg-opacity-25{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Build tools</button>
+            <ul class="dropdown-menu shadow border-secondary-subtle">
+              <li><h6 class="dropdown-header">Find your next PC</h6></li>
+              <li><a class="dropdown-item {% if current == 'questionnaire' or current == 'recommendations' %}active{% endif %}" {% if current == 'questionnaire' or current == 'recommendations' %}aria-current="page"{% endif %} href="{% url 'recommendations:questionnaire' %}">Find my build</a></li>
+              <li><a class="dropdown-item {% if current == 'configure' %}active{% endif %}" {% if current == 'configure' %}aria-current="page"{% endif %} href="{% url 'catalogue:configure' %}">Configure a PC</a></li>
+              <li><a class="dropdown-item {% if current == 'compare' %}active{% endif %}" {% if current == 'compare' %}aria-current="page"{% endif %} href="{% url 'recommendations:compare' %}">Compare builds</a></li>
+              {% if user.is_authenticated %}
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item {% if current == 'shortlist' %}active{% endif %}" {% if current == 'shortlist' %}aria-current="page"{% endif %} href="{% url 'recommendations:shortlist' %}">My shortlist</a></li>
+              {% endif %}
+            </ul>
+          </li>
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if 'review' in current %}active bg-secondary bg-opacity-25{% endif %}" {% if 'review' in current %}aria-current="page"{% endif %} href="{% url 'support:review_list' %}">Customer reviews</a></li>
+          <li class="nav-item"><a class="nav-link px-3 rounded {% if current == 'cart' or current == 'checkout' %}active bg-secondary bg-opacity-25{% endif %}" {% if current == 'cart' or current == 'checkout' %}aria-current="page"{% endif %} href="{% url 'orders:cart' %}">Cart</a></li>
+          {% endif %}
+        </ul>
+        <div class="d-flex flex-column flex-xl-row align-items-xl-center gap-2 pt-3 pt-xl-0 pb-2 pb-xl-0 ms-xl-3">
+          {% if user.is_authenticated %}
+          {% if not user.is_active or not user.employee_profile.active %}
+          <ul class="navbar-nav">
+          <li class="nav-item dropdown">
+            <button class="nav-link dropdown-toggle px-3 rounded {% if current == 'profile' or current == 'order_list' or current == 'order_detail' or current == 'request_list' or current == 'request_create' or current == 'request_detail' %}active bg-secondary bg-opacity-25{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">My account</button>
+            <ul class="dropdown-menu dropdown-menu-xl-end shadow border-secondary-subtle">
+              <li><h6 class="dropdown-header">Your account &amp; orders</h6></li>
+              <li><a class="dropdown-item {% if current == 'profile' %}active{% endif %}" {% if current == 'profile' %}aria-current="page"{% endif %} href="{% url 'accounts:profile' %}">My profile</a></li>
+              <li><a class="dropdown-item {% if current == 'order_list' or current == 'order_detail' %}active{% endif %}" {% if current == 'order_list' or current == 'order_detail' %}aria-current="page"{% endif %} href="{% url 'orders:order_list' %}">My orders</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item {% if current == 'request_list' or current == 'request_create' or current == 'request_detail' %}active{% endif %}" {% if current == 'request_list' or current == 'request_create' or current == 'request_detail' %}aria-current="page"{% endif %} href="{% url 'support:request_list' %}">Support</a></li>
+            </ul>
+          </li>
+          </ul>
+          {% endif %}
+          <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button class="btn btn-outline-light text-nowrap" type="submit">Sign out</button>
+          </form>
+          {% else %}
+          <a class="btn btn-outline-light text-nowrap" href="{% url 'accounts:login' %}">Sign in</a>
+          <a class="btn btn-primary text-nowrap" href="{% url 'accounts:register' %}">Create account</a>
+          {% endif %}
+        </div>
+      </div>
     </div>
   </nav>
+  {% endwith %}
   <main class="container mt-4">
     {% block content %}{% endblock %}
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
 </body>
 </html>
