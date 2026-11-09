@@ -17,6 +17,8 @@ class Component(models.Model):
     brand = models.CharField(max_length=100)
     model = models.CharField(max_length=120)
     description = models.TextField(blank=True)
+    image = models.URLField(max_length=1000, blank=True)
+    source_url = models.URLField(max_length=500, blank=True)
     specs = models.JSONField(default=dict, blank=True)
     socket = models.CharField(max_length=40, blank=True)
     memory_type = models.CharField(max_length=40, blank=True)
@@ -66,6 +68,7 @@ class Configuration(models.Model):
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True)
     image = models.CharField(max_length=255, blank=True)
+    source_url = models.URLField(max_length=500, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)
     components = models.ManyToManyField(Component, through="ConfigurationItem")
@@ -92,6 +95,8 @@ class Accessory(models.Model):
     name = models.CharField(max_length=160)
     category = models.CharField(max_length=80)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    image = models.URLField(max_length=1000, blank=True)
+    source_url = models.URLField(max_length=500, blank=True)
     active = models.BooleanField(default=True)
 
     class Meta:

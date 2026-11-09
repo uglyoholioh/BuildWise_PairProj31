@@ -28,7 +28,7 @@
         {% for component in components %}
           <tr>
             <td>{{ component.get_category_display }}</td>
-            <td><strong>{{ component.brand }} {{ component.model }}</strong>{% if component.description %}<div class="small text-body-secondary">{{ component.description }}</div>{% endif %}</td>
+            <td>{% if component.image %}<img src="{{ component.image }}" alt="{{ component.brand }} {{ component.model }}" loading="lazy" class="img-thumbnail mb-2" style="max-width: 120px; max-height: 80px; object-fit: contain">{% endif %}<br><strong>{{ component.brand }} {{ component.model }}</strong>{% if component.description %}<div class="small text-body-secondary">{{ component.description }}</div>{% endif %}</td>
             <td>
               {% if component.socket %}Socket: {{ component.socket }}<br>{% endif %}
               {% if component.memory_type %}Memory: {{ component.memory_type }}<br>{% endif %}

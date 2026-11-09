@@ -14,9 +14,13 @@ class ComponentForm(forms.ModelForm):
     class Meta:
         model = Component
         fields = (
-            "category", "brand", "model", "description", "price", "active",
+            "category", "brand", "model", "description", "image", "source_url", "price", "active",
             "socket", "memory_type", "form_factor", "ml_tier", "specs",
         )
+        help_texts = {
+            "image": "Public product image URL.",
+            "source_url": "Product page used for the listed details and price.",
+        }
         widgets = {"specs": forms.Textarea(attrs={"rows": 4})}
 
     def __init__(self, *args, **kwargs):
@@ -41,7 +45,11 @@ class AccessoryForm(forms.ModelForm):
 
     class Meta:
         model = Accessory
-        fields = ("name", "category", "price", "active")
+        fields = ("name", "category", "image", "source_url", "price", "active")
+        help_texts = {
+            "image": "Public product image URL.",
+            "source_url": "Product page used for the listed details and price.",
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -84,8 +92,11 @@ class ComponentConflictForm(forms.ModelForm):
 class ConfigurationForm(forms.ModelForm):
     class Meta:
         model = Configuration
-        fields = ("name", "description", "image", "status")
-        help_texts = {"image": "Enter an image URL or project-relative path."}
+        fields = ("name", "description", "image", "source_url", "status")
+        help_texts = {
+            "image": "Enter an image URL or project-relative path.",
+            "source_url": "Optional page used as the source for this preset.",
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -2,6 +2,9 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 from decimal import Decimal
+from io import StringIO
+
+from django.core.management import call_command
 
 from accounts.models import Customer, Employee, StaffAction
 from inventory.models import Reservation, StockAdjustment
@@ -10,6 +13,21 @@ from .compatibility import check_compatibility
 from .forms import ComponentForm
 from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration
 from .pricing import available_preset_quantity, calculate_pc_price
+
+
+class DemoCatalogueSeedTests(TestCase):
+    def test_seed_is_repeatable_and_builds_compatible_draft_presets(self):
+        call_command("seed_demo_catalogue", stdout=StringIO())
+        call_command("seed_demo_catalogue", stdout=StringIO())
+
+        self.assertEqual(Component.objects.count(), 9)
+        self.assertEqual(Accessory.objects.count(), 2)
+        self.assertEqual(Configuration.objects.count(), 2)
+        for preset in Configuration.objects.all():
+            self.assertEqual(preset.status, Configuration.Status.DRAFT)
+            self.assertEqual(preset.items.count(), 7)
+            self.assertFalse(check_compatibility(preset.components.all()))
+        self.assertEqual(Component.objects.filter(category=Component.Category.GPU).count(), 2)
 
 
 class ComponentFormTests(TestCase):
