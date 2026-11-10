@@ -8,7 +8,13 @@
 </head>
 <body>
   {% with current=request.resolver_match.url_name section=request.resolver_match.namespace %}
-  <nav class="navbar navbar-expand-xl bg-dark border-bottom border-primary border-3 shadow-sm py-3" data-bs-theme="dark" aria-label="Main navigation">
+  <nav class="navbar navbar-expand-xl bg-dark border-bottom border-primary border-3 shadow-sm py-3" data-bs-theme="dark" aria-label="{% if current == 'staff_login' %}Staff sign-in navigation{% else %}Main navigation{% endif %}">
+    {% if current == 'staff_login' %}
+    <div class="container-fluid px-lg-4 justify-content-between">
+      <span class="navbar-brand fw-semibold d-flex align-items-center gap-2 mb-0">BuildWise <span class="badge rounded-pill text-bg-primary fw-normal small">Staff sign in</span></span>
+      <a class="btn btn-outline-light text-nowrap" href="{% url 'catalogue:preset_list' %}">Back to storefront</a>
+    </div>
+    {% else %}
     <div class="container-fluid px-lg-4 gap-2">
       {% if user.is_authenticated and user.is_active and user.employee_profile.active %}
       <a class="navbar-brand fw-semibold d-flex align-items-center gap-2 me-4" href="{% url 'inventory:inventory_dashboard' %}">
@@ -100,6 +106,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
   </nav>
   {% endwith %}
   <main class="container mt-4">

@@ -173,3 +173,21 @@ class CustomerAccountTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Username or password is incorrect")
+
+
+class StaffLoginPageTests(TestCase):
+    def test_staff_login_uses_staff_header_without_customer_navigation(self):
+        response = self.client.get(reverse("staff_login"))
+
+        self.assertContains(response, "Staff sign in")
+        self.assertContains(response, "Back to storefront")
+        self.assertNotContains(response, "Customer reviews")
+        self.assertNotContains(response, "Create account")
+        self.assertNotContains(response, "Cart")
+
+    def test_customer_login_keeps_storefront_navigation(self):
+        response = self.client.get(reverse("accounts:login"))
+
+        self.assertContains(response, "Customer reviews")
+        self.assertContains(response, "Create account")
+        self.assertContains(response, "Cart")
