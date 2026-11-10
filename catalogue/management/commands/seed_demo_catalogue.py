@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
+from recommendations.models import Game, GameSettingSupport
 
 
 class Command(BaseCommand):
@@ -32,14 +33,19 @@ class Command(BaseCommand):
                 accessory.image = row["image"]
                 accessory.save(update_fields=["image"])
         for row in data["configurations"]:
-            configuration, _ = Configuration.objects.update_or_create(
+            configuration, created = Configuration.objects.get_or_create(
                 name=row["name"],
                 defaults={key: value for key, value in row.items() if key not in ("name", "components")},
             )
+            if not created:
+                continue
             for key in row["components"]:
-                ConfigurationItem.objects.update_or_create(
+                ConfigurationItem.objects.create(
                     configuration=configuration,
                     component=components[key],
-                    defaults={"quantity": 2 if components[key].category == Component.Category.MEMORY else 1},
+                    quantity=1,
                 )
-        self.stdout.write(self.style.SUCCESS("Demo catalogue loaded; presets remain drafts until staff review."))
+        for row in data["games"]:
+            game, _ = Game.objects.get_or_create(slug=row["slug"], defaults={"name": row["name"]})
+            GameSettingSupport.objects.get_or_create(game=game, resolution="1920x1080", graphics_preset="high")
+        self.stdout.write(self.style.SUCCESS("Demo catalogue and game settings loaded. New presets are drafts."))
