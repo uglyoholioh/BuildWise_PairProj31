@@ -2,13 +2,13 @@ from django.contrib import messages
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import StaffAction
 from catalogue.models import Accessory, Component
 from .availability import stock_position
-from .forms import StockAdjustmentForm
-from .models import StockAdjustment
+from .forms import CancelledStockInspectionForm, StockAdjustmentForm
+from .models import Reservation, StockAdjustment
 
 
 def placeholder(request, *args, **kwargs):
@@ -27,11 +27,58 @@ def inventory_dashboard(request):
     adjustments = StockAdjustment.objects.select_related(
         "component", "accessory", "created_by__user"
     ).order_by("-created_at", "-pk")[:30]
+    inspections = Reservation.objects.filter(
+        status=Reservation.Status.RESERVED, purchased_pc__status="cancelled",
+        component__isnull=False,
+    ).select_related("component", "purchased_pc__order_line").order_by("pk")
     return render(
         request,
         "inventory/dashboard.html",
-        {"components": components, "accessories": accessories, "adjustments": adjustments},
+        {"components": components, "accessories": accessories, "adjustments": adjustments,
+         "inspections": inspections},
     )
+
+
+@require_POST
+def inspect_cancelled_stock(request, pk):
+    form = CancelledStockInspectionForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Enter a positive quantity and choose an inspection outcome.")
+        return redirect("inventory:inventory_dashboard")
+
+    with transaction.atomic():
+        reservation = get_object_or_404(
+            Reservation.objects.select_for_update(), pk=pk, component__isnull=False,
+            purchased_pc__status="cancelled", status=Reservation.Status.RESERVED,
+        )
+        quantity = form.cleaned_data["quantity"]
+        if quantity > reservation.quantity:
+            messages.error(request, "The inspected quantity exceeds the reserved quantity.")
+            return redirect("inventory:inventory_dashboard")
+        employee = request.user.employee_profile
+        discard = form.cleaned_data["outcome"] == "discard"
+        if discard:
+            StockAdjustment.objects.create(
+                item_type="component", component=reservation.component, delta=-quantity,
+                reason=f"Unusable stock from cancelled PC #{reservation.purchased_pc_id}.",
+                created_by=employee,
+            )
+        if quantity < reservation.quantity:
+            Reservation.objects.create(
+                component=reservation.component, purchased_pc=reservation.purchased_pc,
+                quantity=reservation.quantity - quantity,
+            )
+        reservation.quantity = quantity
+        reservation.status = Reservation.Status.CONSUMED if discard else Reservation.Status.RELEASED
+        reservation.save(update_fields=("quantity", "status"))
+        StaffAction.objects.create(
+            employee=employee, action_type="cancelled_stock_inspected",
+            object_ref=str(reservation.pk),
+            detail=f"PC #{reservation.purchased_pc_id}: {quantity} × {reservation.component} "
+                   f"{'written off' if discard else 'returned to available stock'}.",
+        )
+    messages.success(request, "Inspection recorded.")
+    return redirect("inventory:inventory_dashboard")
 
 
 @require_http_methods(["GET", "POST"])

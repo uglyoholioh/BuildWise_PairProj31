@@ -2,8 +2,9 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from accounts.models import Employee, StaffAction
+from accounts.models import Customer, Employee, StaffAction
 from catalogue.models import Accessory, Component
+from orders.models import Order, OrderLine, PurchasedPC
 from .availability import stock_position
 from .models import Reservation, StockAdjustment
 
@@ -33,6 +34,32 @@ class InventoryTests(TestCase):
             "reason": "Opening stock",
             **overrides,
         }
+
+    def test_inspection_can_return_and_write_off_cancelled_parts_once(self):
+        user = User.objects.create_user("buyer")
+        customer = Customer.objects.create(user=user, name="Buyer", email="buyer@example.test")
+        order = Order.objects.create(customer=customer, total_snapshot=200)
+        line = OrderLine.objects.create(order=order, kind="build", name="PC", unit_price_snapshot=200)
+        pc = PurchasedPC.objects.create(order_line=line, unit_index=1, status="cancelled")
+        StockAdjustment.objects.create(
+            item_type="component", component=self.component, delta=2,
+            reason="Opening stock", created_by=self.employee,
+        )
+        reservation = Reservation.objects.create(component=self.component, purchased_pc=pc, quantity=2)
+        url = reverse("inventory:inspect_cancelled_stock", args=[reservation.pk])
+        data = {"quantity": 1, "outcome": "return"}
+        self.assertContains(self.client.get(reverse("inventory:inventory_dashboard")), "awaiting inspection")
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.assertEqual(self.client.post(url, data).status_code, 404)
+        pending = pc.reservations.get(status=Reservation.Status.RESERVED)
+        self.assertEqual(pending.quantity, 1)
+        self.client.post(reverse("inventory:inspect_cancelled_stock", args=[pending.pk]), {
+            "quantity": 1, "outcome": "discard",
+        })
+        self.assertEqual(stock_position("component", self.component), {
+            "physical": 1, "reserved": 0, "available": 1,
+        })
+        self.assertEqual(StaffAction.objects.filter(action_type="cancelled_stock_inspected").count(), 2)
 
     def test_available_stock_subtracts_active_reservations_for_both_item_types(self):
         StockAdjustment.objects.create(

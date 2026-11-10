@@ -12,6 +12,26 @@
   <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
 {% endfor %}
 
+{% if inspections %}
+<section class="card mb-4">
+  <div class="card-header"><h2 class="h5 mb-0">Cancelled PC parts awaiting inspection</h2></div>
+  <div class="list-group list-group-flush">
+    {% for reservation in inspections %}
+    <div class="list-group-item">
+      <p class="mb-2">Order #{{ reservation.purchased_pc.order_line.order_id }} · PC #{{ reservation.purchased_pc_id }} · {{ reservation.component }} × {{ reservation.quantity }}</p>
+      <form method="post" action="{% url 'inventory:inspect_cancelled_stock' reservation.pk %}" class="d-flex flex-wrap gap-2 align-items-center">
+        {% csrf_token %}
+        <label for="inspection-{{ reservation.pk }}">Inspected quantity</label>
+        <input id="inspection-{{ reservation.pk }}" name="quantity" type="number" class="form-control form-control-sm w-auto" min="1" max="{{ reservation.quantity }}" value="{{ reservation.quantity }}" required>
+        <button class="btn btn-outline-primary btn-sm" name="outcome" value="return">Return to stock</button>
+        <button class="btn btn-outline-danger btn-sm" name="outcome" value="discard">Write off</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section class="card mb-4">
   <div class="card-header"><h2 class="h5 mb-0">Components</h2></div>
   <div class="table-responsive"><table class="table table-striped align-middle mb-0">

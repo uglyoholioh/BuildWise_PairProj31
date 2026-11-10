@@ -35,3 +35,8 @@ class StockAdjustmentForm(forms.ModelForm):
         elif item_type == "accessory" and (accessory is None or component is not None):
             self.add_error("accessory", "Select exactly one accessory for this adjustment.")
         return cleaned_data
+
+
+class CancelledStockInspectionForm(forms.Form):
+    quantity = forms.IntegerField(min_value=1, max_value=32767)
+    outcome = forms.ChoiceField(choices=(("return", "Return to stock"), ("discard", "Write off")))
