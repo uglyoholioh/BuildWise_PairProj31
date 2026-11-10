@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.signing import Signer
 from django.db import OperationalError, transaction
 from django.db.models import Q
 from django.http import Http404
@@ -54,6 +55,16 @@ def _cart_build(row):
     if row.get("kind") != "preset" and len(items) != len(row.get("custom_snapshot", {}).get("components", [])):
         issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
     return configuration, items, issues
+
+
+def _checkout_quote(customer, rows):
+    # Bind the submitted form to the exact cart and prices it displayed.
+    lines = [
+        (row["line"].get("id"), row["line"].get("quantity", 1), str(row["price"]),
+         sorted((item.component_id, item.quantity) for item in row["items"]))
+        for row in rows
+    ]
+    return Signer(salt="orders.checkout").sign_object([customer.pk, lines])
 
 
 @require_http_methods(["GET", "POST"])
@@ -182,7 +193,7 @@ def checkout(request):
         messages.error(request, "Your cart is empty.")
         return redirect("orders:cart")
     fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
-    form = CheckoutForm(request.POST or None, instance=customer)
+    form = CheckoutForm(request.POST if request.method == "POST" else None, instance=customer)
     preview = []
     total = 0
     for line in lines:
@@ -200,6 +211,8 @@ def checkout(request):
         line["price_changed"] = line.get("price_changed", False) or price_changed
         preview.append({"line": line, "items": items, "accessory": accessory, "configuration": configuration if line.get("kind") != "accessory" else None, "issues": issues, "price": price, "changed": price_changed or line["price_changed"]})
     invalid = any(row["issues"] or row["price"] is None or (row["line"].get("kind") != "accessory" and not fee) for row in preview)
+    quote = _checkout_quote(customer, preview)
+    form.initial["quote"] = quote
     if request.method == "POST" and form.is_valid() and not invalid:
         if any(row["changed"] for row in preview) and not form.cleaned_data["confirm_prices"]:
             for row in preview:
@@ -222,6 +235,16 @@ def checkout(request):
                     request.session["cart"] = []
                     request.session.pop("current_build", None)
                     return redirect("orders:order_detail", pk=existing_order.pk)
+                if form.cleaned_data["quote"] != quote:
+                    data = request.POST.copy()
+                    data["quote"] = quote
+                    data.pop("confirm_prices", None)
+                    form = CheckoutForm(data, instance=customer)
+                    form.add_error(None, "Prices or items changed. Review the updated total before placing your order.")
+                    return render(request, "orders/checkout.html", {
+                        "form": form, "lines": preview, "total": total, "invalid": invalid,
+                    })
+                current_fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
                 component_ids = sorted({item.component_id for row in preview for item in row["items"]})
                 locked = {item.pk: item for item in Component.objects.select_for_update().filter(pk__in=component_ids, active=True)}
                 if len(locked) != len(component_ids):
@@ -241,13 +264,21 @@ def checkout(request):
                         requirements["accessory"][accessory.pk] = requirements["accessory"].get(accessory.pk, 0) + line.get("quantity", 1)
                         row["accessory"] = accessory
                     else:
+                        if line["kind"] == "preset":
+                            _, current_items, current_issues = _cart_build(line)
+                            if current_issues or sorted((item.component_id, item.quantity) for item in current_items) != sorted(
+                                (item.component_id, item.quantity) for item in row["items"]
+                            ):
+                                raise ValueError("A preset changed during checkout. Review the updated cart.")
                         for item in row["items"]:
                             item.component = locked[item.component_id]
                             requirements["component"][item.component_id] = requirements["component"].get(item.component_id, 0) + item.quantity * line.get("quantity", 1)
                         current_issues = check_configuration_components(item.component for item in row["items"])
                         if current_issues:
                             raise ValueError("A build in your cart is no longer compatible.")
-                        current_price = calculate_pc_price(row["items"], fee.fee_amount)
+                        if current_fee is None:
+                            raise ValueError("The PC assembly fee is unavailable. Review the updated cart.")
+                        current_price = calculate_pc_price(row["items"], current_fee.fee_amount)
                     if str(current_price) != str(row["price"]):
                         row["line"]["quoted_price"] = str(current_price)
                         row["line"]["price_changed"] = True

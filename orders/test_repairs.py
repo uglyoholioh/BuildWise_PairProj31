@@ -430,7 +430,11 @@ class IntegratedPurchaseTests(TestCase):
         self.assertRedirects(response, reverse('orders:checkout'))
         self.assertEqual(len(self.client.session['cart']), 2)
         buyer = User.objects.get(username='guestbuyer')
-        response = self.client.post(reverse('orders:checkout'), {'name': 'Guest Buyer', 'delivery_address': 'Test road'})
+        checkout = self.client.get(reverse('orders:checkout'))
+        response = self.client.post(reverse('orders:checkout'), {
+            'name': 'Guest Buyer', 'delivery_address': 'Test road',
+            'quote': checkout.context['form']['quote'].value(),
+        })
         order = Order.objects.get()
         self.assertRedirects(response, reverse('orders:order_detail', args=[order.pk]))
         accessory.name = 'Renamed mouse'

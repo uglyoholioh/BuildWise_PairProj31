@@ -14,7 +14,7 @@ from accounts.views import employee_update
 from catalogue.models import Accessory, Component
 from inventory.models import Reservation, StockAdjustment
 from .models import Order, OrderLine, PurchasedPC
-from .views import checkout, order_cancel, start_order
+from .views import _checkout_quote, checkout, order_cancel, start_order
 
 
 class RequestSession(dict):
@@ -58,6 +58,10 @@ class SQLiteConcurrencyTests(TransactionTestCase):
             request = self.request(customer.user, {'name': customer.name, 'delivery_address': 'Test road'},
                                    [{'id': f'cart-{customer.pk}', 'kind': 'accessory', 'accessory_id': accessory.pk,
                                      'name': accessory.name, 'quantity': 1}])
+            request.POST = request.POST.copy()
+            request.POST["quote"] = _checkout_quote(request.user.customer_profile, [{
+                "line": request.session["cart"][0], "items": [], "price": "20.00",
+            }])
             return checkout(request).status_code
         self.assertEqual(self.race([lambda: buy(self.customers[0]), lambda: buy(self.customers[1])]), [302, 302])
         self.assertEqual(Order.objects.count(), 1)
@@ -71,6 +75,10 @@ class SQLiteConcurrencyTests(TransactionTestCase):
             request = self.request(self.customers[0].user, {"name": "Buyer", "delivery_address": "Test road"},
                                    [{"id": "same-cart-line", "kind": "accessory", "accessory_id": accessory.pk,
                                      "name": accessory.name, "quantity": 1}])
+            request.POST = request.POST.copy()
+            request.POST["quote"] = _checkout_quote(request.user.customer_profile, [{
+                "line": request.session["cart"][0], "items": [], "price": "20.00",
+            }])
             return checkout(request).status_code
         self.assertEqual(self.race([buy, buy]), [302, 302])
         self.assertEqual(Order.objects.count(), 1)
