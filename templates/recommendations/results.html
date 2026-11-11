@@ -2,7 +2,7 @@
 {% block title %}Build recommendations | BuildWise{% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-3 mb-3"><div><h1 class="h3 mb-1">Build recommendations</h1>{% if questionnaire %}<p class="text-body-secondary mb-0">Maximum PC budget: ${{ questionnaire.max_spend }} · Performance preset: {{ questionnaire.get_perf_level_display|default:questionnaire.perf_level }}</p>{% endif %}</div><a class="btn btn-outline-primary align-self-start" href="{% url 'recommendations:questionnaire' %}">Revise gaming needs</a></div>
-{% if temporary_estimates %}<div class="alert alert-warning" role="status"><strong>Development estimates:</strong> FPS values use a temporary tier-based heuristic, not a trained model. Treat them as illustrative only.</div>{% endif %}
+{% if synthetic_estimates %}<div class="alert alert-warning" role="status"><strong>Prototype estimates:</strong> FPS values come from a trained model using synthetic data, not measured benchmarks. They are illustrative, not performance guarantees.</div>{% endif %}
 {% if not questionnaire or not questionnaire.game_settings.exists %}<div class="alert alert-info">Choose games and targets first to receive recommendations.</div>
 {% elif no_fee %}<div class="alert alert-warning">The shared assembly and testing fee is not configured, so PC prices cannot be compared yet.</div>
 {% elif not eligible %}<div class="alert alert-info">No available, compatible published build has supported estimates for every selected game's settings. Try other settings or games.</div>

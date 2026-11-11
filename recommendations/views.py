@@ -14,7 +14,7 @@ from .forms import QuestionnaireForm, ShortlistForm
 from catalogue.models import ConfigurationItem
 from inventory.availability import available_component_quantity
 from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
-from .predictor import predict_temporary_fps
+from .predictor import predict_fps
 
 
 def placeholder(request, *args, **kwargs):
@@ -208,7 +208,7 @@ def recommendations(request):
                 resolution=setting.resolution,
                 graphics_preset=setting.graphics_preset,
             ).exists()
-            fps = predict_temporary_fps(items, setting) if supported else None
+            fps = predict_fps(items, setting) if supported else None
             if fps is None:
                 break
             estimates.append({"setting": setting, "fps": fps, "shortfall": max(0, setting.fps_goal - fps)})
@@ -272,7 +272,7 @@ def recommendations(request):
             "over_budget": over_budget,
             "extra_cost": over_budget["price"] - questionnaire.max_spend if over_budget else None,
             "unsupported_count": unsupported_count,
-            "temporary_estimates": True,
+            "synthetic_estimates": True,
         },
     )
 
@@ -388,7 +388,7 @@ def compare_builds(request):
                     game=setting.game, resolution=setting.resolution,
                     graphics_preset=setting.graphics_preset,
                 ).exists()
-                fps = predict_temporary_fps(items, setting) if supported and not issues else None
+                fps = predict_fps(items, setting) if supported and not issues else None
                 estimates.append({"setting": setting, "fps": fps})
         builds.append({
             "kind": kind,
