@@ -15,10 +15,6 @@
     {"name":"Logitech MK235 Wireless Keyboard and Mouse Combo","category":"Keyboard and mouse combo","image":"https://online.challenger.sg/cdn/shop/files/2c7d0bdf43ba8b94d03bb8ce4265600f.png?v=1759396626&width=1200","source_url":"https://online.challenger.sg/products/logitech-mk235-wireless-keyboard-and-mouse-combo","price":"25.00"},
     {"name":"Logitech G203 LIGHTSYNC Gaming Mouse (Black)","category":"Gaming mouse","image":"https://online.challenger.sg/cdn/shop/files/g203-bk_1.jpg?v=1782964577&width=800","source_url":"https://online.challenger.sg/products/logitech-g203-gen2-lightsync-gaming-mouse-black","price":"24.90"}
   ],
-  "games": [
-    {"slug":"valorant","name":"Valorant"},
-    {"slug":"cyberpunk-2077","name":"Cyberpunk 2077"}
-  ],
   "configurations": [
     {"name":"[Demo] BuildWise 5060 Gaming PC","description":"Draft demonstration build using the listed components. Staff must verify current prices, stock and compatibility before publishing.","image":"","source_url":"https://dynacoretech.com/collections/gpu?limit=9&page=1","status":"draft","components":["cpu","board","ram","gpu_mid","ssd","psu","case"]},
     {"name":"[Demo] BuildWise RX 9070 XT Gaming PC","description":"Draft demonstration build using the listed components. Staff must verify current prices, stock and compatibility before publishing.","image":"","source_url":"https://dynacoretech.com/products/xfx-swift-amd-radeon-rx-9070xt-triple-fan-gaming-edition-16gb-gddr6-graphics-card-840191502750","status":"draft","components":["cpu","board","ram","gpu_high","ssd","psu","case"]}

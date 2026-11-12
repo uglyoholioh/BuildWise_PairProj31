@@ -222,33 +222,38 @@ class SubstitutionRepairTests(TestCase):
 
     def create_gaming_preferences(self, resolution="1920x1080"):
         from recommendations.models import Game, GameSettingSupport, QuestionnaireResponse, QuestionnaireGameSetting
-        game = Game.objects.create(name="Test Game", slug="test-game")
+        game = Game.objects.create(name="Test Game", slug="cyberpunk-2077")
         GameSettingSupport.objects.create(game=game, resolution="1920x1080", graphics_preset="high")
         response = QuestionnaireResponse.objects.create(customer=self.customer, perf_level="balanced", max_spend=1500)
         QuestionnaireGameSetting.objects.create(response=response, game=game, fps_goal=90,
                                                 resolution=resolution, graphics_preset="high")
         gpu = self.parts[3]
         gpu.ml_tier = "high"
+        gpu.model = "GeForce RTX 4060 8GB"
         gpu.save()
+        self.cpu.model = "Ryzen 5 7500F"
+        self.cpu.save()
+        self.line.custom_snapshot["components"][0]["model"] = self.cpu.model
+        self.line.custom_snapshot["components"][3]["model"] = gpu.model
         self.line.custom_snapshot["components"][3]["ml_tier"] = "high"
         self.line.save()
-        replacement = self.new_part(Component.Category.GPU, "Replacement GPU", ml_tier="enthusiast",
+        replacement = self.new_part(Component.Category.GPU, "GeForce RTX 4070 12GB", ml_tier="enthusiast",
                                     specs={"VRAM (GB)": 16, "Idle fan speed": 0})
         return response, replacement
 
-    def test_customer_sees_saved_specifications_prices_and_provisional_fps(self):
+    def test_customer_sees_saved_specifications_prices_and_trained_fps(self):
         questionnaire, replacement = self.create_gaming_preferences()
         self.propose(original=self.parts[3], replacement=replacement)
         proposal = self.pc.substitutions.get()
         self.assertEqual(proposal.spec_differences, "")
         game = proposal.performance_snapshot["games"][0]
-        self.assertEqual((game["original_fps"], game["replacement_fps"]), (76, 102))
+        self.assertEqual((game["original_fps"], game["replacement_fps"]), (66, 103))
         self.assertTrue(game["meets_target"])
         self.client.force_login(self.customer.user)
         page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
         for text in ("Original component", "Proposed component", "VRAM (GB)", "16", "Idle fan speed",
-                     "Changed", "Test Game", "90 FPS", "76 FPS (estimate)", "102 FPS (estimate)",
-                     "Temporary development predictor", "Confirmed PC price", "$700.00", "$1400.00",
+                     "Changed", "Test Game", "90 FPS", "66 FPS (estimate)", "103 FPS (estimate)",
+                     "Random Forest regression", "Confirmed PC price", "$700.00", "$1400.00",
                      "Declining cancels only PC"):
             self.assertContains(page, text)
         self.assertContains(page, "<td>0</td>", html=True)
@@ -269,7 +274,7 @@ class SubstitutionRepairTests(TestCase):
         setting.game.save()
         page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
         self.assertContains(page, "Test Game")
-        self.assertContains(page, "102 FPS (estimate)")
+        self.assertContains(page, "103 FPS (estimate)")
         self.assertNotContains(page, "Later game name")
         self.assertNotContains(page, "Later name")
         proposal.refresh_from_db()
@@ -294,13 +299,13 @@ class SubstitutionRepairTests(TestCase):
         page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
         self.assertContains(page, "Unavailable for this build or these settings")
 
-    def test_missing_gpu_tier_does_not_invent_revised_estimate(self):
+    def test_unknown_gpu_model_does_not_invent_revised_estimate(self):
         questionnaire, replacement = self.create_gaming_preferences()
-        replacement.ml_tier = "unknown-tier"
+        replacement.model = "Unknown GPU"
         replacement.save()
         self.propose(original=self.parts[3], replacement=replacement)
         game = self.pc.substitutions.get().performance_snapshot["games"][0]
-        self.assertEqual(game["original_fps"], 76)
+        self.assertEqual(game["original_fps"], 66)
         self.assertIsNone(game["replacement_fps"])
         self.assertFalse(game["meets_target"])
 

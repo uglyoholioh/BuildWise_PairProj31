@@ -77,9 +77,9 @@ class SubstitutionBrowserTests(StaticLiveServerTestCase):
             (Component.Category.POWER_SUPPLY, {}),
             (Component.Category.CASE, {"form_factor": "ATX"}),
         ]
-        parts = [Component.objects.create(category=category, brand="Example", model=category, price=100, **fields)
+        parts = [Component.objects.create(category=category, brand="Example", model=("Ryzen 5 7500F" if category == Component.Category.CPU else "GeForce RTX 4060 8GB" if category == Component.Category.GPU else category), price=100, **fields)
                  for category, fields in categories]
-        replacement = Component.objects.create(category=Component.Category.GPU, brand="Example", model="New GPU",
+        replacement = Component.objects.create(category=Component.Category.GPU, brand="Example", model="GeForce RTX 4070 12GB",
                                                 price=200, ml_tier="enthusiast", specs={"VRAM (GB)": 16})
         for part in parts + [replacement]:
             StockAdjustment.objects.create(item_type="component", component=part, delta=5,
@@ -87,7 +87,7 @@ class SubstitutionBrowserTests(StaticLiveServerTestCase):
         line = OrderLine.objects.create(order=order, kind="build", name="Gaming PC", quantity=2,
                                         unit_price_snapshot=700,
                                         custom_snapshot={"components": [component_snapshot(part) for part in parts]})
-        game = Game.objects.create(name="Test Game", slug="test-game")
+        game = Game.objects.create(name="Test Game", slug="cyberpunk-2077")
         GameSettingSupport.objects.create(game=game, resolution="1920x1080", graphics_preset="high")
         questionnaire = QuestionnaireResponse.objects.create(customer=customer, perf_level="balanced", max_spend=1500)
         QuestionnaireGameSetting.objects.create(response=questionnaire, game=game, fps_goal=90,
@@ -118,8 +118,8 @@ class SubstitutionBrowserTests(StaticLiveServerTestCase):
             page.goto(self.live_server_url + reverse("orders:order_detail", args=[order.pk]))
             first = page.locator(f"#substitution-{proposals[0].pk}")
             self.assertIn("VRAM (GB)", first.inner_text())
-            self.assertIn("76 FPS (estimate)", first.inner_text())
-            self.assertIn("102 FPS (estimate)", first.inner_text())
+            self.assertIn("66 FPS (estimate)", first.inner_text())
+            self.assertIn("103 FPS (estimate)", first.inner_text())
             self.assertIn("$1400.00", first.inner_text())
             first.get_by_role("button", name="Accept replacement", exact=True).click()
             page.wait_for_load_state()

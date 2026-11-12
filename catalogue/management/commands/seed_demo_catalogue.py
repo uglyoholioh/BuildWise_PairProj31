@@ -5,7 +5,6 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
-from recommendations.models import Game, GameSettingSupport
 
 
 class Command(BaseCommand):
@@ -45,7 +44,4 @@ class Command(BaseCommand):
                     component=components[key],
                     quantity=1,
                 )
-        for row in data["games"]:
-            game, _ = Game.objects.get_or_create(slug=row["slug"], defaults={"name": row["name"]})
-            GameSettingSupport.objects.get_or_create(game=game, resolution="1920x1080", graphics_preset="high")
-        self.stdout.write(self.style.SUCCESS("Demo catalogue and game settings loaded. New presets are drafts."))
+        self.stdout.write(self.style.SUCCESS("Demo catalogue loaded. New presets are drafts."))

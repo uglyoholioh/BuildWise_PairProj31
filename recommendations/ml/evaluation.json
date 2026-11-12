@@ -1,0 +1,80 @@
+{
+  "model_version": "synthetic-fps-v1",
+  "data_source": "AI-assisted synthetic simulation; no measured benchmarks",
+  "limitations": "Trained on synthetic data, not measured benchmarks. CPU, GPU, game, resolution and graphics preset are modelled. RAM, cooling, drivers, ray tracing, upscaling and frame generation are not modelled. FPS values are illustrative estimates, not guarantees.",
+  "seed": 2108,
+  "features": [
+    "cpu",
+    "gpu",
+    "game",
+    "resolution",
+    "graphics_preset"
+  ],
+  "target": "average_fps",
+  "dataset_sha256": "d9683a28d4915cdee4ea845867b1310ac8d076c6796a0b9f5ff10fea78baad2d",
+  "split_strategy": "Disjoint CPU/GPU pairs; no repeated-run or pair overlap",
+  "splits": {
+    "train": {
+      "rows": 1512,
+      "hardware_pairs": [
+        "core-i5-12400f|rtx-3060",
+        "core-i5-12400f|rtx-4060",
+        "core-i5-12400f|rtx-4070",
+        "core-i5-12400f|rtx-5060",
+        "core-i7-13700k|rtx-4060",
+        "core-i7-13700k|rtx-5060",
+        "core-i7-13700k|rx-9070-xt",
+        "ryzen-5-7500f|rtx-4060",
+        "ryzen-5-7500f|rx-9070-xt",
+        "ryzen-7-7800x3d|rtx-4060",
+        "ryzen-7-7800x3d|rtx-4070",
+        "ryzen-7-7800x3d|rtx-5060",
+        "ryzen-7-7800x3d|rx-7800-xt",
+        "ryzen-7-7800x3d|rx-9070-xt"
+      ]
+    },
+    "validation": {
+      "rows": 540,
+      "hardware_pairs": [
+        "core-i5-12400f|rx-9070-xt",
+        "core-i7-13700k|rtx-3060",
+        "ryzen-5-7500f|rtx-4070",
+        "ryzen-5-7500f|rx-7800-xt",
+        "ryzen-7-7800x3d|rtx-3060"
+      ]
+    },
+    "test": {
+      "rows": 540,
+      "hardware_pairs": [
+        "core-i5-12400f|rx-7800-xt",
+        "core-i7-13700k|rtx-4070",
+        "core-i7-13700k|rx-7800-xt",
+        "ryzen-5-7500f|rtx-3060",
+        "ryzen-5-7500f|rtx-5060"
+      ]
+    }
+  },
+  "versions": {
+    "scikit-learn": "1.7.2",
+    "joblib": "1.5.2",
+    "numpy": "2.5.4"
+  },
+  "validation_candidates": [
+    {
+      "max_depth": 8,
+      "mae_fps": 18.7001585026299
+    },
+    {
+      "max_depth": 16,
+      "mae_fps": 14.523659666314908
+    }
+  ],
+  "baseline_test_mae_fps": 51.208613511659806,
+  "selected_max_depth": 16,
+  "validation_mae_fps": 14.523659666314908,
+  "test_mae_fps": 7.881787176417118,
+  "test_r2": 0.9613483169049368,
+  "persisted_training_rows": 1512,
+  "algorithm": "RandomForestRegressor",
+  "n_estimators": 120
+}

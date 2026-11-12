@@ -9,7 +9,6 @@ from django.core.management import call_command
 from accounts.models import Customer, Employee, StaffAction
 from inventory.models import Reservation, StockAdjustment
 from orders.models import Order, OrderLine
-from recommendations.models import GameSettingSupport
 from .compatibility import check_compatibility
 from .forms import ComponentForm
 from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration
@@ -29,7 +28,6 @@ class DemoCatalogueSeedTests(TestCase):
             self.assertEqual(preset.items.count(), 7)
             self.assertFalse(check_compatibility(preset.components.all()))
         self.assertEqual(Component.objects.filter(category=Component.Category.GPU).count(), 2)
-        self.assertEqual(GameSettingSupport.objects.count(), 2)
         preset = Configuration.objects.first()
         preset.status = Configuration.Status.PUBLISHED
         preset.save(update_fields=("status",))

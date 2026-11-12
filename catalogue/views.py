@@ -33,7 +33,7 @@ def placeholder(request, *args, **kwargs):
 @require_http_methods(["GET", "POST"])
 def configure(request):
     from recommendations.models import GameSettingSupport
-    from recommendations.predictor import predict_temporary_fps
+    from recommendations.predictor import predict_fps
 
     session_build = request.session.get("current_build", {})
     preset_id = request.GET.get("preset") if request.method == "GET" else None
@@ -100,7 +100,7 @@ def configure(request):
     if questionnaire and not issues:
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(game=setting.game, resolution=setting.resolution, graphics_preset=setting.graphics_preset).exists()
-            estimates.append({"setting": setting, "fps": predict_temporary_fps(items, setting) if supported else None})
+            estimates.append({"setting": setting, "fps": predict_fps(items, setting) if supported else None})
     if request.method == "POST":
         request.session["current_build"] = session_build
         if request.POST.get("action") == "shortlist":
@@ -426,14 +426,14 @@ def preset_detail(request, pk):
         if saved_response and (saved_response.customer_id is None or saved_response.customer_id == getattr(customer, "pk", None)):
             questionnaire = saved_response
     if questionnaire:
-        from recommendations.predictor import predict_temporary_fps
+        from recommendations.predictor import predict_fps
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(
                 game=setting.game,
                 resolution=setting.resolution,
                 graphics_preset=setting.graphics_preset,
             ).exists()
-            estimate = predict_temporary_fps(list(configuration.items.all()), setting) if supported else None
+            estimate = predict_fps(list(configuration.items.all()), setting) if supported else None
             game_needs.append({"setting": setting, "supported": supported, "estimate": estimate})
     return render(
         request,

@@ -26,13 +26,13 @@ The last command includes file-backed SQLite concurrency tests and six real-brow
 | Concurrent review submission | `support/test_concurrency.py` |
 | Real-browser flows: questionnaire, shortlist, accessory suggestions, checkout retry, substitutions, reviews | `recommendations/test_browser.py`, `orders/test_browser.py`, `support/test_browser.py` |
 
-**Current run.** Django system and migration checks passed. All 166 tests passed in 34 seconds, including the six browser flows and file-backed SQLite concurrency checks.
+**Previous run before the trained FPS model was merged.** Django system and migration checks passed. All 166 tests passed, including the six browser flows and file-backed SQLite concurrency checks.
 
 ## Before starting
 
 1. Follow the local setup in `README.md`, migrate the database, and start the server.
 2. Create/link a manager as described in `README.md`. Sign in and create a separate employee account. Keep customer, employee, manager, and (if available) inactive-employee accounts distinct. Do not reuse passwords.
-3. Load the demo catalogue with `python manage.py seed_demo_catalogue`. In staff pages, review the draft records, set the shared assembly fee, add stock for the demo parts/accessories, and publish at least two complete compatible presets. Keep one draft and one withdrawn preset for visibility checks. Do not publish data you have not checked.
+3. Load the demo catalogue with `python manage.py seed_demo_catalogue` and the supported game settings with `python manage.py seed_fps_games`. In staff pages, review the draft records, set the shared assembly fee, add stock for the demo parts/accessories, and publish at least two complete compatible presets. Keep one draft and one withdrawn preset for visibility checks. Do not publish data you have not checked.
 4. Have two customer accounts available (A and B). Customer A should have a complete cartable build; Customer B is used for ownership/privacy checks. You will need to place orders and progress at least one PC order to delivery, one accessory-only order, and one order that can be held for a substitution. This changes the local demo database; note or screenshot initial stock before starting.
 5. Use a current desktop browser. Keep a notes file open. For responsive checks, use browser device emulation at 375px and 768px widths.
 

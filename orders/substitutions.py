@@ -1,7 +1,8 @@
 from catalogue.compatibility import check_configuration_components
 from catalogue.models import Component, ConfigurationItem
 from recommendations.models import GameSettingSupport
-from recommendations.predictor import predict_temporary_fps
+from recommendations.predictor import predict_fps
+from recommendations.ml.schema import MODEL_VERSION, MODEL_METHOD, MODEL_LIMITATIONS
 
 from .allocations import approved_pc_parts, component_snapshot
 
@@ -77,7 +78,7 @@ def substitution_review_snapshot(pc, original, replacement):
     after = [part for part in after if part["quantity"] > 0]
     after.append(replacement_snapshot)
 
-    performance = {"games": [], "method": "Temporary development predictor"}
+    performance = {"games": [], "method": MODEL_METHOD, "model_version": MODEL_VERSION, "limitations": MODEL_LIMITATIONS}
     customer = pc.order_line.order.customer
     questionnaire = customer.questionnaires.order_by("-created_at", "-pk").first()
     if not questionnaire or not questionnaire.game_settings.exists():
@@ -96,9 +97,9 @@ def substitution_review_snapshot(pc, original, replacement):
         original_fps = None
         replacement_fps = None
         if supported and original_complete:
-            original_fps = predict_temporary_fps(original_items, setting)
+            original_fps = predict_fps(original_items, setting)
         if supported and replacement_complete:
-            replacement_fps = predict_temporary_fps(replacement_items, setting)
+            replacement_fps = predict_fps(replacement_items, setting)
         performance["games"].append({
             "game": setting.game.name,
             "resolution": setting.resolution,

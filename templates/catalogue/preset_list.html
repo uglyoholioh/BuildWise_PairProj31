@@ -26,7 +26,7 @@
         class="form-select" id="tier" name="tier" aria-describedby="tier-help">
         <option value="">Any tier</option>{% for option in tiers %}<option value="{{ option }}" {% if tier == option %}selected{% endif %}>{{ option|title }}</option>{% endfor %}
       </select>
-      <div id="tier-help" class="form-text">Qualitative GPU class used by the provisional FPS estimator.</div>
+      <div id="tier-help" class="form-text">Filter by the GPU tier recorded in the catalogue.</div>
     </div>
     <div class="col-sm-6 col-lg-3"><label class="form-label" for="availability">Availability</label><select
         class="form-select" id="availability" name="availability">

@@ -32,8 +32,8 @@
   <h4 class="h6">Estimated gaming performance</h4>
   {% if proposal.performance_snapshot.games %}
     <p class="small">Based on your latest saved gaming preferences when this proposal was made.
-      Method: {{ proposal.performance_snapshot.method }}. These provisional estimates use GPU tier and graphics settings;
-      they do not assess CPU differences and are not performance guarantees.</p>
+      Method: {{ proposal.performance_snapshot.method }}.
+      {% if proposal.performance_snapshot.limitations %}{{ proposal.performance_snapshot.limitations }}{% else %}These historical provisional estimates use GPU tier and graphics settings; they do not assess CPU differences and are not performance guarantees.{% endif %}</p>
     <div class="table-responsive">
       <table class="table table-sm">
         <caption>Estimated FPS before and after the one-unit replacement.</caption>
