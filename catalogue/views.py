@@ -50,6 +50,7 @@ def configure(request):
     selected_ids = {row["component_id"]: row["quantity"] for row in session_build.get("components", [])}
     if request.method == "POST":
         previous_quantities = selected_ids
+        previous_components = Component.objects.in_bulk(previous_quantities)
         selected_ids = {}
         for category, label in Component.Category.choices:
             raw_id = request.POST.get(f"component_{category}", "").strip()
@@ -59,7 +60,14 @@ def configure(request):
                 except (ValueError, Component.DoesNotExist):
                     messages.error(request, f"Select an active {label.lower()}.")
                     return redirect("catalogue:configure")
-                selected_ids[component.pk] = previous_quantities.get(component.pk, 1)
+                category_parts = [
+                    pk for pk in previous_quantities
+                    if pk in previous_components and previous_components[pk].category == category
+                ]
+                if category_parts and component.pk == category_parts[0]:
+                    selected_ids.update({pk: previous_quantities[pk] for pk in category_parts})
+                else:
+                    selected_ids[component.pk] = previous_quantities.get(component.pk, 1)
         session_build = {
             "name": request.POST.get("name", "My custom PC").strip()[:160] or "My custom PC",
             "preset_id": session_build.get("preset_id"),
@@ -469,6 +477,8 @@ def _edit_preset(request, configuration=None):
         if form.cleaned_data["status"] == Configuration.Status.PUBLISHED:
             if fee is None:
                 form.add_error("status", "Set the shared assembly fee before publishing a preset.")
+            if len({component.category for component in components}) != len(components):
+                form.add_error(None, "Choose one component model per category. Use quantity for identical units.")
             for issue in check_configuration_components(components):
                 form.add_error(None, issue)
 

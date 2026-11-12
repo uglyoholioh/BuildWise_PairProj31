@@ -33,11 +33,37 @@ class CheckoutTests(TestCase):
             ConfigurationItem.objects.create(configuration=self.configuration, component=component, quantity=1)
             StockAdjustment.objects.create(item_type="component", component=component, delta=3, reason="Opening stock", created_by=self.employee)
 
+    def submit_checkout(self, data, **kwargs):
+        url = reverse("orders:checkout")
+        if "quote" not in data:
+            page = self.client.get(url)
+            if page.status_code == 200:
+                data = {**data, "quote": page.context["form"]["quote"].value()}
+        return self.client.post(url, data, **kwargs)
+
+    def test_checkout_rejects_confirmed_checkbox_with_stale_quote(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("orders:checkout"))
+        self.assertContains(page, "725.00")
+        quote = page.context["form"]["quote"].value()
+        Component.objects.filter(category=Component.Category.CPU).update(price=150)
+        data = {"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"}
+        response = self.submit_checkout({**data, "quote": quote}, follow=True)
+        self.assertContains(response, "Review the updated total")
+        self.assertContains(response, "775.00")
+        self.assertContains(response, "2 New Road")
+        self.assertFalse(response.context["form"]["confirm_prices"].value())
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+        self.submit_checkout({**data, "quote": response.context["form"]["quote"].value()})
+        self.assertEqual(Order.objects.get().total_snapshot, Decimal("775.00"))
+
     def test_blank_delivery_address_does_not_change_cart_or_create_order(self):
         self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
         self.client.force_login(self.user)
         cart = self.client.session["cart"]
-        response = self.client.post(reverse("orders:checkout"), {
+        response = self.submit_checkout({
             "name": "Buyer", "delivery_address": "   ", "confirm_prices": "on",
         })
         self.assertFormError(response.context["form"], "delivery_address", "This field is required.")
@@ -62,7 +88,7 @@ class CheckoutTests(TestCase):
 
         for attempt in range(2):
             with self.subTest(attempt=attempt):
-                response = self.client.post(reverse("orders:checkout"), data)
+                response = self.submit_checkout(data)
                 self.assertContains(response, "Simulated payment was declined")
                 self.assertContains(response, "2 New Road")
                 self.assertEqual(response.context["form"]["name"].value(), "Updated Buyer")
@@ -75,7 +101,7 @@ class CheckoutTests(TestCase):
                 self.assertEqual((customer.name, customer.delivery_address), ("Buyer", "1 Old Road"))
 
         data.pop("simulate_payment_failure")
-        response = self.client.post(reverse("orders:checkout"), data)
+        response = self.submit_checkout(data)
         order = Order.objects.get()
         self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
         self.assertEqual((order.payment_status, order.total_snapshot), ("paid", Decimal("765.00")))
@@ -91,7 +117,7 @@ class CheckoutTests(TestCase):
         session = self.client.session
         session["cart"] = cart
         session.save()
-        response = self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        response = self.submit_checkout({**data, "simulate_payment_failure": "on"})
         self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
         self.assertEqual(Order.objects.count(), 1)
         self.assertEqual(Reservation.objects.count(), 8)
@@ -104,7 +130,7 @@ class CheckoutTests(TestCase):
         self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
         self.client.force_login(self.user)
         cart = self.client.session["cart"]
-        response = self.client.post(reverse("orders:checkout"), {
+        response = self.submit_checkout({
             "name": "Buyer", "delivery_address": "2 New Road", "simulate_payment_failure": "on",
         })
         self.assertContains(response, "Simulated payment was declined")
@@ -117,13 +143,13 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
         data = {"name": "Buyer", "delivery_address": "2 New Road"}
-        self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        self.submit_checkout({**data, "simulate_payment_failure": "on"})
         Component.objects.filter(category=Component.Category.CPU).update(price=150)
-        response = self.client.post(reverse("orders:checkout"), data, follow=True)
+        response = self.submit_checkout(data, follow=True)
         self.assertContains(response, "Prices changed. Review the updated total")
         self.assertFalse(Order.objects.exists())
         self.assertFalse(Reservation.objects.exists())
-        self.client.post(reverse("orders:checkout"), {**data, "confirm_prices": "on"})
+        self.submit_checkout({**data, "confirm_prices": "on"})
         self.assertEqual(Order.objects.get().total_snapshot, Decimal("775.00"))
 
     def test_payment_retry_rechecks_stock(self):
@@ -131,11 +157,11 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
         data = {"name": "Buyer", "delivery_address": "2 New Road"}
-        self.client.post(reverse("orders:checkout"), {**data, "simulate_payment_failure": "on"})
+        self.submit_checkout({**data, "simulate_payment_failure": "on"})
         cpu = Component.objects.get(category=Component.Category.CPU)
         StockAdjustment.objects.create(item_type="component", component=cpu, delta=-3,
                                        reason="Stock sold before retry", created_by=self.employee)
-        response = self.client.post(reverse("orders:checkout"), data, follow=True)
+        response = self.submit_checkout(data, follow=True)
         self.assertContains(response, "Not enough stock")
         self.assertTrue(self.client.session["cart"])
         self.assertFalse(Order.objects.exists())
@@ -151,7 +177,7 @@ class CheckoutTests(TestCase):
         self.assertEqual(self.client.session["current_build"]["preset_id"], self.configuration.pk)
         self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
         self.client.force_login(self.user)
-        self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "Test road", "confirm_prices": "on"})
+        self.submit_checkout({"name": "Buyer", "delivery_address": "Test road", "confirm_prices": "on"})
         order = Order.objects.get()
         line = order.lines.get()
         self.assertIsNone(line.configuration)
@@ -189,7 +215,7 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
+        response = self.submit_checkout({"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
 
         order = Order.objects.get()
         self.assertRedirects(response, reverse("orders:order_detail", args=[order.pk]))
@@ -201,7 +227,7 @@ class CheckoutTests(TestCase):
         self.assertEqual(order.lines.get().custom_snapshot["source_preset_id"], self.configuration.pk)
         self.assertFalse(order.lines.get().custom_snapshot["customised_from_preset"])
         self.assertEqual(self.client.session["cart"], [])
-        self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road"})
+        self.submit_checkout({"name": "Buyer", "delivery_address": "2 New Road"})
         self.assertEqual(Order.objects.count(), 1)
 
     def test_insufficient_combined_stock_keeps_cart_and_creates_no_order(self):
@@ -213,7 +239,7 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("orders:checkout"), {"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
+        response = self.submit_checkout({"name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on"})
 
         self.assertRedirects(response, reverse("orders:cart"))
         self.assertEqual(Order.objects.count(), 0)
@@ -230,7 +256,7 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("orders:checkout"), {
+        response = self.submit_checkout({
             "name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on",
         })
 
@@ -252,7 +278,7 @@ class CheckoutTests(TestCase):
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("orders:checkout"), {
+        response = self.submit_checkout({
             "name": "Buyer", "delivery_address": "2 New Road", "confirm_prices": "on",
         })
 

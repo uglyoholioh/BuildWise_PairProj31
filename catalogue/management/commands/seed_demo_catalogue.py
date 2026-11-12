@@ -32,14 +32,16 @@ class Command(BaseCommand):
                 accessory.image = row["image"]
                 accessory.save(update_fields=["image"])
         for row in data["configurations"]:
-            configuration, _ = Configuration.objects.update_or_create(
+            configuration, created = Configuration.objects.get_or_create(
                 name=row["name"],
                 defaults={key: value for key, value in row.items() if key not in ("name", "components")},
             )
+            if not created:
+                continue
             for key in row["components"]:
-                ConfigurationItem.objects.update_or_create(
+                ConfigurationItem.objects.create(
                     configuration=configuration,
                     component=components[key],
-                    defaults={"quantity": 2 if components[key].category == Component.Category.MEMORY else 1},
+                    quantity=1,
                 )
-        self.stdout.write(self.style.SUCCESS("Demo catalogue loaded; presets remain drafts until staff review."))
+        self.stdout.write(self.style.SUCCESS("Demo catalogue loaded. New presets are drafts."))

@@ -28,6 +28,17 @@ class DemoCatalogueSeedTests(TestCase):
             self.assertEqual(preset.items.count(), 7)
             self.assertFalse(check_compatibility(preset.components.all()))
         self.assertEqual(Component.objects.filter(category=Component.Category.GPU).count(), 2)
+        preset = Configuration.objects.first()
+        preset.status = Configuration.Status.PUBLISHED
+        preset.save(update_fields=("status",))
+        item = preset.items.first()
+        item.quantity = 3
+        item.save(update_fields=("quantity",))
+        call_command("seed_demo_catalogue", stdout=StringIO())
+        preset.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(preset.status, Configuration.Status.PUBLISHED)
+        self.assertEqual(item.quantity, 3)
 
 
 class ComponentFormTests(TestCase):
@@ -101,6 +112,21 @@ class ComponentManagementTests(TestCase):
 
 
 class CustomerConfiguratorTests(TestCase):
+    def test_saving_legacy_preset_keeps_both_storage_models(self):
+        first, second = [
+            Component.objects.create(category=Component.Category.STORAGE, brand="Example", model=name, price=100)
+            for name in ("First drive", "Second drive")
+        ]
+        preset = Configuration.objects.create(name="Existing preset", status=Configuration.Status.PUBLISHED)
+        preset.items.create(component=first, quantity=1)
+        preset.items.create(component=second, quantity=1)
+        url = reverse("catalogue:configure")
+        self.client.get(url, {"preset": preset.pk})
+        self.client.post(url, {"component_storage": first.pk, "name": "Same build"})
+        self.assertEqual(self.client.session["current_build"]["components"], [
+            {"component_id": first.pk, "quantity": 1}, {"component_id": second.pk, "quantity": 1},
+        ])
+
     def test_guest_build_selections_persist_in_session(self):
         cpu = Component.objects.create(
             category=Component.Category.CPU, brand="Example", model="CPU", socket="AM5", price="100.00"
