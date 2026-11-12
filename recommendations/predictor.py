@@ -1,20 +1,47 @@
+"""Load the trusted offline model and validate storefront inputs before inference."""
+import logging
+import pickle
+from functools import lru_cache
+
+import joblib
+import numpy as np
+
 from catalogue.models import Component
+from .ml.schema import CPU_ALIASES, GPU_ALIASES, FEATURES, MODEL_PATH, MODEL_VERSION, hardware_key
+
+logger = logging.getLogger(__name__)
 
 
-# shortcut: fixed tier and setting multipliers, replace with the trained predictor in joint task #30.
-TIER_FPS = {"entry": 30, "low": 45, "mid": 60, "medium": 60, "high": 90, "enthusiast": 120}
-RESOLUTION_FACTOR = {"1280x720": 1.25, "1920x1080": 1.0, "2560x1440": 0.75, "3840x2160": 0.5}
-GRAPHICS_FACTOR = {"low": 1.15, "medium": 1.0, "high": 0.85, "ultra": 0.7}
-
-
-def predict_temporary_fps(components, game_setting):
-    """Return an explicitly provisional tier-based estimate, or None when unsupported."""
-    gpu = next((item.component for item in components if item.component.category == Component.Category.GPU), None)
-    if gpu is None:
+@lru_cache(maxsize=1)
+def load_fps_model():
+    # Only load this repository-owned artifact. joblib files must never come from customer uploads.
+    try:
+        artifact = joblib.load(MODEL_PATH)
+    except (OSError, ValueError, EOFError, pickle.UnpicklingError) as error:
+        logger.error('FPS model could not be loaded: %s', error)
         return None
-    base = TIER_FPS.get(gpu.ml_tier.strip().casefold())
-    resolution = RESOLUTION_FACTOR.get(game_setting.resolution.casefold())
-    graphics = GRAPHICS_FACTOR.get(game_setting.graphics_preset.strip().casefold())
-    if base is None or resolution is None or graphics is None:
+    if not isinstance(artifact, dict) or artifact.get('version') != MODEL_VERSION or tuple(artifact.get('features', ())) != FEATURES:
+        logger.error('FPS model version or feature schema does not match this application.')
         return None
-    return round(base * resolution * graphics)
+    return artifact
+
+
+def predict_fps(components, game_setting):
+    """Return a synthetic-model FPS estimate, or None for unsupported/missing inputs."""
+    components = list(components)
+    cpus = [item for item in components if item.component.category == Component.Category.CPU]
+    gpus = [item for item in components if item.component.category == Component.Category.GPU]
+    if len(cpus) != 1 or len(gpus) != 1 or cpus[0].quantity != 1 or gpus[0].quantity != 1:
+        return None
+    features = {
+        'cpu': hardware_key(cpus[0].component.model, CPU_ALIASES),
+        'gpu': hardware_key(gpus[0].component.model, GPU_ALIASES),
+        'game': game_setting.game.slug,
+        'resolution': game_setting.resolution.strip().casefold(),
+        'graphics_preset': game_setting.graphics_preset.strip().casefold(),
+    }
+    artifact = load_fps_model()
+    if artifact is None or any(features[key] not in artifact['supported_inputs'][key] for key in FEATURES):
+        return None
+    estimate = float(artifact['pipeline'].predict([features])[0])
+    return max(1, round(estimate)) if np.isfinite(estimate) and estimate > 0 else None
