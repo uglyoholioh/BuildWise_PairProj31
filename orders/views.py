@@ -39,7 +39,6 @@ def _cart_build(row):
         if not configuration:
             return None, [], ["This preset is no longer available."]
         items = list(configuration.items.all())
-        name = configuration.name
     else:
         snapshot = row.get("custom_snapshot", {})
         ids = [part.get("component_id") for part in snapshot.get("components", [])]
@@ -50,11 +49,24 @@ def _cart_build(row):
             if part.get("component_id") in components and part.get("quantity", 0) > 0
         ]
         configuration = None
-        name = row.get("name", "Custom PC")
     issues = check_configuration_components(item.component for item in items)
     if row.get("kind") != "preset" and len(items) != len(row.get("custom_snapshot", {}).get("components", [])):
         issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
     return configuration, items, issues
+
+
+def _preset_part_changes(line, items):
+    if line.get("kind") != "preset":
+        return [], []
+    previous = line.get("custom_snapshot", {}).get("components")
+    if previous is None:
+        return [], []
+    current = _build_snapshot(items)["components"]
+    previous_keys = {(part["component_id"], part["quantity"]) for part in previous}
+    current_keys = {(part["component_id"], part["quantity"]) for part in current}
+    removed = [part for part in previous if (part["component_id"], part["quantity"]) not in current_keys]
+    added = [part for part in current if (part["component_id"], part["quantity"]) not in previous_keys]
+    return removed, added
 
 
 def _checkout_quote(customer, rows):
@@ -109,7 +121,8 @@ def cart(request):
         changed = price is not None and old_price is not None and str(price) != str(old_price)
         line["price_changed"] = line.get("price_changed", False) or changed
         line["quoted_price"] = str(price) if price is not None else None
-        display_lines.append({"line": line, "items": items, "accessory": accessory, "issues": issues, "price": price, "changed": changed, "stock": stock})
+        removed, added = _preset_part_changes(line, items) if not issues else ([], [])
+        display_lines.append({"line": line, "items": items, "accessory": accessory, "issues": issues, "price": price, "changed": changed, "stock": stock, "parts_changed": bool(removed or added)})
         if price is not None:
             total += price * quantity
     request.session["cart"] = lines
@@ -119,10 +132,15 @@ def cart(request):
 @require_POST
 def cart_add(request):
     kind = request.POST.get("kind")
+    if kind in ("preset", "accessory"):
+        try:
+            item_id = int(request.POST.get("item_id", ""))
+        except ValueError:
+            raise Http404("Invalid catalogue item.") from None
     if kind == "preset":
         configuration = get_object_or_404(
             Configuration.objects.prefetch_related("items__component"),
-            pk=request.POST.get("item_id"), status=Configuration.Status.PUBLISHED,
+            pk=item_id, status=Configuration.Status.PUBLISHED,
         )
         items = list(configuration.items.all())
         name = configuration.name
@@ -134,7 +152,7 @@ def cart_add(request):
         items = [ConfigurationItem(component=components[part["component_id"]], quantity=part["quantity"]) for part in build.get("components", []) if part.get("component_id") in components]
         name, configuration_id = build.get("name", "Custom PC"), None
     elif kind == "accessory":
-        accessory = get_object_or_404(Accessory, pk=request.POST.get("item_id"), active=True)
+        accessory = get_object_or_404(Accessory, pk=item_id, active=True)
         if not available_accessory_quantity(accessory):
             messages.error(request, "This accessory is out of stock.")
             return redirect("catalogue:accessory_list")
@@ -209,18 +227,24 @@ def checkout(request):
             total += price * line.get("quantity", 1)
         price_changed = price is not None and line.get("quoted_price") not in (None, str(price))
         line["price_changed"] = line.get("price_changed", False) or price_changed
-        preview.append({"line": line, "items": items, "accessory": accessory, "configuration": configuration if line.get("kind") != "accessory" else None, "issues": issues, "price": price, "changed": price_changed or line["price_changed"]})
+        removed, added = _preset_part_changes(line, items) if not issues else ([], [])
+        preview.append({"line": line, "items": items, "accessory": accessory, "configuration": configuration if line.get("kind") != "accessory" else None, "issues": issues, "price": price, "changed": line["price_changed"], "removed": removed, "added": added})
     invalid = any(row["issues"] or row["price"] is None or (row["line"].get("kind") != "accessory" and not fee) for row in preview)
     quote = _checkout_quote(customer, preview)
     form.initial["quote"] = quote
     if request.method == "POST" and form.is_valid() and not invalid:
-        if any(row["changed"] for row in preview) and not form.cleaned_data["confirm_prices"]:
+        prices_changed = any(row["changed"] for row in preview)
+        parts_changed = any(row["removed"] or row["added"] for row in preview)
+        if (prices_changed or parts_changed) and not form.cleaned_data["confirm_prices"]:
             for row in preview:
-                if row["price"] is not None:
+                if row["changed"] and row["price"] is not None:
                     row["line"]["quoted_price"] = str(row["price"])
                     row["line"]["price_changed"] = True
             request.session["cart"] = lines
-            messages.warning(request, "Prices changed. Review the updated total and confirm before placing your order.")
+            if parts_changed:
+                messages.warning(request, "Preset components changed. Review the updated order and confirm before placing your order.")
+            else:
+                messages.warning(request, "Prices changed. Review the updated total and confirm before placing your order.")
             return redirect("orders:cart")
         try:
             with transaction.atomic():

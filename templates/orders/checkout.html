@@ -2,7 +2,24 @@
 {% block title %}Checkout | BuildWise{% endblock %}
 {% block content %}
 <h1 class="h3">Review your order</h1>
-<ul>{% for row in lines %}<li>{{ row.line.name }} × {{ row.line.quantity }} — {% if row.price != None %}${{ row.price }} each{% else %}Unavailable{% endif %}{% if row.changed %}<span class="text-warning-emphasis"> (price review required)</span>{% endif %}{% for issue in row.issues %}<div class="text-danger">{{ issue }}</div>{% endfor %}</li>{% endfor %}</ul>
+<ul>
+  {% for row in lines %}
+    <li>
+      {{ row.line.name }} × {{ row.line.quantity }} — {% if row.price != None %}${{ row.price }} each{% else %}Unavailable{% endif %}
+      {% if row.changed %}<span class="text-warning-emphasis"> (price review required)</span>{% endif %}
+      {% if row.removed or row.added %}
+        <div class="alert alert-warning py-2 mt-2">
+          The preset components changed. Review these changes before placing your order.
+          <ul>
+            {% for part in row.removed %}<li>Removed {{ part.brand }} {{ part.model }} × {{ part.quantity }}</li>{% endfor %}
+            {% for part in row.added %}<li>Added {{ part.brand }} {{ part.model }} × {{ part.quantity }}</li>{% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+      {% for issue in row.issues %}<div class="text-danger">{{ issue }}</div>{% endfor %}
+    </li>
+  {% endfor %}
+</ul>
 <p class="h5">Total: ${{ total }}</p>
 <form method="post" class="card card-body">{% csrf_token %}
   {% for error in form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endfor %}

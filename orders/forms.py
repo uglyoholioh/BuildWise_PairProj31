@@ -9,7 +9,7 @@ from .allocations import expected_pc_quantities
 class CheckoutForm(forms.ModelForm):
     delivery_address = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
     quote = forms.CharField(required=False, widget=forms.HiddenInput)
-    confirm_prices = forms.BooleanField(required=False, label="I have reviewed the current prices")
+    confirm_prices = forms.BooleanField(required=False, label="I have reviewed the current prices and components")
     simulate_payment_failure = forms.BooleanField(
         required=False,
         label="Simulate payment decline",

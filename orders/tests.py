@@ -59,6 +59,46 @@ class CheckoutTests(TestCase):
         self.submit_checkout({**data, "quote": response.context["form"]["quote"].value()})
         self.assertEqual(Order.objects.get().total_snapshot, Decimal("775.00"))
 
+    def test_checkout_requires_review_of_same_price_preset_part_swap(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.force_login(self.user)
+        original = self.configuration.items.get(component__category=Component.Category.GPU)
+        replacement = Component.objects.create(
+            category=Component.Category.GPU, brand="Example", model="Replacement GPU", price=original.component.price,
+        )
+        StockAdjustment.objects.create(
+            item_type="component", component=replacement, delta=1, reason="Opening stock", created_by=self.employee,
+        )
+        original.component = replacement
+        original.save(update_fields=["component"])
+
+        cart = self.client.get(reverse("orders:cart"))
+        self.assertContains(cart, "The preset components changed")
+        page = self.client.get(reverse("orders:checkout"))
+        self.assertContains(page, "Removed Example gpu")
+        self.assertContains(page, "Added Example Replacement GPU")
+        quote = page.context["form"]["quote"].value()
+        data = {"name": "Buyer", "delivery_address": "2 New Road", "quote": quote}
+        response = self.submit_checkout(data, follow=True)
+        self.assertContains(response, "Preset components changed")
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Reservation.objects.exists())
+
+        self.submit_checkout({**data, "confirm_prices": "on"})
+        order = Order.objects.get()
+        self.assertEqual(order.total_snapshot, Decimal("725.00"))
+        self.assertTrue(any(
+            part["component_id"] == replacement.pk
+            for part in order.lines.get().custom_snapshot["components"]
+        ))
+
+    def test_invalid_catalogue_ids_return_not_found(self):
+        self.assertEqual(self.client.get(reverse("catalogue:configure"), {"preset": "abc"}).status_code, 404)
+        for kind in ("preset", "accessory"):
+            with self.subTest(kind=kind):
+                response = self.client.post(reverse("orders:cart_add"), {"kind": kind, "item_id": "abc"})
+                self.assertEqual(response.status_code, 404)
+
     def test_blank_delivery_address_does_not_change_cart_or_create_order(self):
         self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
         self.client.force_login(self.user)

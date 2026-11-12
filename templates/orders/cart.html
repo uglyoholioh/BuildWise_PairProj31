@@ -8,6 +8,7 @@
   <article class="card mb-3"><div class="card-body">
     <div class="d-flex justify-content-between gap-3"><h2 class="h5">{{ row.line.name }}</h2><strong>{% if row.price != None %}${{ row.price }} each{% else %}Price unavailable{% endif %}</strong></div>
     {% if row.changed or row.line.price_changed %}<div class="alert alert-warning py-2">The price changed. Review this updated amount before checkout.</div>{% endif %}
+    {% if row.parts_changed %}<div class="alert alert-warning py-2">The preset components changed. Review the updated parts at checkout.</div>{% endif %}
     {% if row.issues %}<div class="alert alert-danger">{% for issue in row.issues %}<div>{{ issue }}</div>{% endfor %}</div>{% endif %}
     {% if row.accessory %}<p>{{ row.accessory.category }} · {{ row.accessory.name }}</p>{% else %}<ul>{% for item in row.items %}<li>{{ item.component.get_category_display }} — {{ item.component.brand }} {{ item.component.model }} × {{ item.quantity }} (${{ item.component.price }} each)</li>{% endfor %}</ul>{% endif %}
     {% if row.stock < row.line.quantity %}<p class="text-danger">Only {{ row.stock }} available.</p>{% endif %}
