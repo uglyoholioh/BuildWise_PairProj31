@@ -341,6 +341,18 @@ class PresetManagementTests(TestCase):
         self.assertEqual(available_preset_quantity(items), 1)
         self.assertContains(self.client.get(reverse("catalogue:preset_manage_list")), "$825.00")
 
+    def test_publishing_rejects_multiple_cpus_or_graphics_cards(self):
+        components = self.create_components()
+        AssemblyFeeSetting.objects.create(fee_amount="25.00", updated_by=self.employee)
+        for category in (Component.Category.CPU, Component.Category.GPU):
+            with self.subTest(category=category):
+                data = self.preset_data(components)
+                index = next(i for i, component in enumerate(components) if component.category == category)
+                data[f"items-{index}-quantity"] = "2"
+                response = self.client.post(reverse("catalogue:preset_create"), data)
+                self.assertContains(response, "Published presets must have exactly one CPU and one graphics card.")
+                self.assertFalse(Configuration.objects.exists())
+
     def test_only_active_manager_can_change_shared_fee(self):
         response = self.client.post(
             reverse("catalogue:assembly_fee"), {"fee_amount": "30.00"}

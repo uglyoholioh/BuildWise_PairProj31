@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth.decorators import user_passes_test
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -38,6 +38,10 @@ def configure(request):
     session_build = request.session.get("current_build", {})
     preset_id = request.GET.get("preset") if request.method == "GET" else None
     if preset_id:
+        try:
+            preset_id = int(preset_id)
+        except ValueError:
+            raise Http404("Invalid preset.") from None
         preset = get_object_or_404(Configuration, pk=preset_id, status=Configuration.Status.PUBLISHED)
         session_build = {
             "name": preset.name,
@@ -479,6 +483,12 @@ def _edit_preset(request, configuration=None):
                 form.add_error("status", "Set the shared assembly fee before publishing a preset.")
             if len({component.category for component in components}) != len(components):
                 form.add_error(None, "Choose one component model per category. Use quantity for identical units.")
+            if any(
+                item["component"].category in (Component.Category.CPU, Component.Category.GPU)
+                and item["quantity"] != 1
+                for item in items
+            ):
+                form.add_error(None, "Published presets must have exactly one CPU and one graphics card.")
             for issue in check_configuration_components(components):
                 form.add_error(None, issue)
 
