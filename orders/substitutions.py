@@ -88,8 +88,8 @@ def substitution_review_snapshot(pc, original, replacement):
     performance["questionnaire_created_at"] = questionnaire.created_at.isoformat()
     original_items = snapshot_items(before)
     replacement_items = snapshot_items(after)
-    original_complete = not check_configuration_components(item.component for item in original_items)
-    replacement_complete = not check_configuration_components(item.component for item in replacement_items)
+    original_complete = not check_configuration_components((item.component for item in original_items), require_active=False)
+    replacement_complete = not check_configuration_components((item.component for item in replacement_items), require_active=False)
     for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
         supported = GameSettingSupport.objects.filter(
             game=setting.game, resolution=setting.resolution, graphics_preset=setting.graphics_preset,

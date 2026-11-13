@@ -22,12 +22,12 @@ def component_name(component):
     return f"{component.get_category_display()} {component.brand} {component.model}"
 
 
-def check_compatibility(components):
+def check_compatibility(components, *, require_active=True):
     components = list(components)
     problems = []
 
     for component in components:
-        if not component.active:
+        if require_active and not component.active:
             problems.append(f"{component_name(component)} is inactive and cannot be sold.")
         for field in REQUIRED_SPECS.get(component.category, ()):
             if not getattr(component, field).strip():
@@ -73,7 +73,7 @@ def check_compatibility(components):
     return problems
 
 
-def check_configuration_components(components):
+def check_configuration_components(components, *, require_active=True):
     components = list(components)
     categories = {component.category for component in components}
     missing = [
@@ -81,7 +81,7 @@ def check_configuration_components(components):
         for category in REQUIRED_CONFIGURATION_CATEGORIES
         if category not in categories
     ]
-    problems = check_compatibility(components)
+    problems = check_compatibility(components, require_active=require_active)
     if missing:
         problems.insert(0, f"Configuration is missing required categories: {', '.join(missing)}.")
     return problems

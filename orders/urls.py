@@ -20,5 +20,6 @@ urlpatterns = [
     path("staff/orders/<int:pk>/dispatch", views.dispatch_order, name="dispatch_order"),
     path("staff/orders/<int:pk>/deliver", views.staff_confirm_delivery, name="staff_confirm_delivery"),
     path("staff/pcs/<int:pk>/substitution", views.propose_substitution, name="propose_substitution"),
+    path("staff/substitutions/<int:pk>/withdraw", views.withdraw_substitution, name="withdraw_substitution"),
     path("substitutions/<int:pk>/decision", views.decide_substitution, name="decide_substitution"),
 ]

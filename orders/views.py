@@ -150,7 +150,10 @@ def cart_add(request):
         lines = request.session.get("cart", [])
         existing = next((line for line in lines if line.get("kind") == "accessory" and line.get("accessory_id") == accessory.pk), None)
         if existing:
-            existing["quantity"] = min(20, existing.get("quantity", 1) + 1)
+            if existing.get("quantity", 1) >= 20:
+                messages.error(request, "You can add up to 20 units per cart line.")
+                return redirect("orders:cart")
+            existing["quantity"] = existing.get("quantity", 1) + 1
         else:
             lines.append({"id": uuid4().hex, "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk, "name": accessory.name, "quantity": 1, "quoted_price": str(accessory.price)})
         request.session["cart"] = lines
@@ -183,7 +186,10 @@ def cart_add(request):
     lines = request.session.get("cart", [])
     existing = next((line for line in lines if line.get("key") == key), None)
     if existing:
-        existing["quantity"] = min(20, existing.get("quantity", 1) + quantity)
+        if existing.get("quantity", 1) >= 20:
+            messages.error(request, "You can add up to 20 units per cart line.")
+            return redirect("orders:cart")
+        existing["quantity"] = existing.get("quantity", 1) + quantity
     else:
         lines.append({"id": uuid4().hex, "key": key, "kind": kind, "configuration_id": configuration_id, "name": name, "custom_snapshot": snapshot, "quantity": quantity, "quoted_price": str(calculate_pc_price(items, fee.fee_amount))})
     request.session["cart"] = lines
@@ -443,6 +449,36 @@ def propose_substitution(request, pk):
     return render(request, "orders/substitution_form.html", {"form": form, "pc": pc, "order": order})
 
 
+@staff_required
+@require_POST
+def withdraw_substitution(request, pk):
+    with transaction.atomic():
+        proposal = get_object_or_404(
+            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"), pk=pk,
+        )
+        pc = proposal.purchased_pc
+        order = pc.order_line.order
+        if (
+            proposal.status != "pending" or pc.status != "on_hold"
+            or order.status not in ("placed", "in_progress") or order.payment_status != "paid"
+        ):
+            messages.error(request, "This proposal is no longer pending.")
+        else:
+            proposal.status = "withdrawn"
+            proposal.decided_at = timezone.now()
+            employee = request.user.employee_profile
+            proposal.decided_by = f"staff:{employee.pk}"
+            proposal.save(update_fields=("status", "decided_at", "decided_by"))
+            pc.hold_reason = "The replacement offer was withdrawn. Staff can propose another part."
+            pc.save(update_fields=("hold_reason",))
+            OrderStatusHistory.objects.create(
+                order=order, from_status=order.status, to_status=order.status,
+                note=f"Staff withdrew substitution #{proposal.pk} for PC #{pc.pk}.", employee=employee,
+            )
+            messages.success(request, "Replacement offer withdrawn.")
+    return redirect("orders:order_queue")
+
+
 @login_required
 @require_POST
 def decide_substitution(request, pk):
@@ -522,10 +558,8 @@ def decide_substitution(request, pk):
                 if pc.status == "on_hold":
                     if pc.quality_checks.exists():
                         pc.status = "corrective_work"
-                    elif order.status == "placed":
-                        pc.status = "queued"
                     else:
-                        pc.status = "assembling"
+                        pc.status = "assembling" if pc.assembly_started else "queued"
                 pc.hold_reason = ""
                 pc.save(update_fields=("status", "hold_reason"))
                 OrderStatusHistory.objects.create(
@@ -534,12 +568,10 @@ def decide_substitution(request, pk):
                 )
                 messages.success(request, "Substitution accepted. The confirmed order price is unchanged.")
         elif decision == "decline":
-            for reservation in Reservation.objects.filter(
-                purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
-            ):
-                if proposal.previous_pc_status == "queued":
-                    reservation.status = Reservation.Status.RELEASED
-                    reservation.save(update_fields=("status",))
+            if not pc.assembly_started:
+                pc.reservations.filter(status=Reservation.Status.RESERVED).update(
+                    status=Reservation.Status.RELEASED,
+                )
             proposal.status = "declined"
             proposal.decided_at = timezone.now()
             proposal.decided_by = f"customer:{request.user.pk}"
@@ -598,15 +630,17 @@ def order_queue(request):
     )
     for order in orders:
         lines = list(order.lines.all())
-        order.accessory_allocation_issues = accessory_allocation_issues(order)
+        order.accessory_allocation_issues = (
+            accessory_allocation_issues(order) if order.status in ("placed", "in_progress", "packing") else []
+        )
         for line in lines:
             for purchased_pc in line.pcs.all():
                 purchased_pc.allocation_issues = (
-                    [] if purchased_pc.status == "quality_passed"
+                    [] if purchased_pc.status in ("quality_passed", "cancelled")
                     else purchased_pc_allocation_issues(purchased_pc)
                 )
-                purchased_pc.has_pending_substitution = purchased_pc.substitutions.filter(status="pending").exists()
-                if purchased_pc.status in ("quality_checking", "corrective_work") and not purchased_pc.has_pending_substitution:
+                purchased_pc.pending_substitution = purchased_pc.substitutions.filter(status="pending").first()
+                if purchased_pc.status in ("quality_checking", "corrective_work") and not purchased_pc.pending_substitution:
                     purchased_pc.quality_check_revision = quality_check_revision(purchased_pc)
         order.pcs_ready = _pcs_ready(lines)
         order.can_start_packing = (
@@ -694,8 +728,9 @@ def start_order(request, pk):
                 messages.error(request, f"PC #{pc.pk} was put on hold: {pc.hold_reason}")
             else:
                 pc.status = "assembling"
+                pc.assembly_started = True
                 pc.hold_reason = ""
-                pc.save(update_fields=("status", "hold_reason"))
+                pc.save(update_fields=("status", "assembly_started", "hold_reason"))
                 if order.status == "placed":
                     order.status = "in_progress"
                     order.save(update_fields=("status",))
