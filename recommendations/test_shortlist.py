@@ -5,6 +5,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import Customer, Employee
+from catalogue.drafts import build_revision
 from catalogue.models import AssemblyFeeSetting, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
 from .models import ShortlistItem
@@ -116,7 +117,7 @@ class ShortlistTests(TestCase):
         self.assertContains(page, "No longer available")
         self.assertTrue(page.context["issues"])
         self.assertIsNone(page.context["price"])
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         self.assertFalse(self.client.session.get("cart"))
 
     def test_deleted_optional_component_is_flagged_in_reopen_and_comparison(self):
@@ -131,7 +132,7 @@ class ShortlistTests(TestCase):
         page = self.reopen(saved)
         self.assertContains(page, "is no longer in the catalogue")
         self.assertIsNone(page.context["price"])
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         self.assertFalse(self.client.session.get("cart"))
         page = self.compare(saved)
         self.assertContains(page, "Some saved components are no longer in the catalogue")
@@ -160,7 +161,7 @@ class ShortlistTests(TestCase):
         self.assertEqual(self.reopen(saved).context["price"], Decimal("825.00"))
         self.client.post(reverse("catalogue:configure"), {"name": "Updated", **{f"component_{part.category}": part.pk for part in self.parts}})
         self.assertEqual(self.client.session["current_build"]["components"][0]["quantity"], 2)
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         snapshot = self.client.session["cart"][0]["custom_snapshot"]
         self.assertEqual(snapshot["source_preset_id"], self.preset.pk)
         self.assertTrue(snapshot["customised_from_preset"])

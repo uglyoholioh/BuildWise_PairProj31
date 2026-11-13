@@ -17,15 +17,15 @@
     <a class="btn btn-outline-secondary" href="{% url 'catalogue:accessory_list' %}">Browse accessories</a>
   </div>
 </section>
-{% if filter_error %}<div class="alert alert-warning" role="alert">{{ filter_error }}</div>{% endif %}
+{% if filter_form.errors %}<div class="alert alert-warning" role="alert">{{ filter_form.errors }}</div>{% endif %}
 {% if has_published_presets %}
 <form method="get" class="card card-body mb-4">
   <div class="row g-3 align-items-end">
     <div class="col-sm-6 col-lg-2"><label class="form-label" for="min-price">Minimum price</label><input
-        class="form-control" id="min-price" type="number" min="0" step="0.01" name="min_price" value="{{ min_price }}">
+        class="form-control" id="min-price" type="number" min="0" step="0.01" name="min_price" value="{{ min_price|default_if_none:'' }}">
     </div>
     <div class="col-sm-6 col-lg-2"><label class="form-label" for="max-price">Maximum price</label><input
-        class="form-control" id="max-price" type="number" min="0" step="0.01" name="max_price" value="{{ max_price }}">
+        class="form-control" id="max-price" type="number" min="0" step="0.01" name="max_price" value="{{ max_price|default_if_none:'' }}">
     </div>
     <div class="col-sm-6 col-lg-3"><label class="form-label" for="tier">GPU performance tier</label><select
         class="form-select" id="tier" name="tier" aria-describedby="tier-help">

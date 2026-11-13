@@ -87,8 +87,16 @@ def check_configuration_components(components):
     return problems
 
 
-def check_configuration(configuration):
-    return check_configuration_components(configuration.components.all())
+def check_preset_items(items):
+    items = list(items)
+    components = [item.component for item in items]
+    problems = check_configuration_components(components)
+    if len({component.category for component in components}) != len(components):
+        problems.append("Choose one component model per category. Use quantity for identical units.")
+    if any(item.component.category in (Component.Category.CPU, Component.Category.GPU)
+           and item.quantity != 1 for item in items):
+        problems.append("Published presets must have exactly one CPU and one graphics card.")
+    return problems
 
 
 def revalidate_configurations(components):
@@ -97,10 +105,10 @@ def revalidate_configurations(components):
         return []
     affected = Configuration.objects.filter(
         status=Configuration.Status.PUBLISHED, components__pk__in=component_ids
-    ).distinct()
+    ).distinct().prefetch_related("items__component")
     moved_to_draft = []
     for configuration in affected:
-        if check_configuration(configuration):
+        if check_preset_items(configuration.items.all()):
             configuration.status = Configuration.Status.DRAFT
             configuration.save(update_fields=("status",))
             moved_to_draft.append(configuration.name)

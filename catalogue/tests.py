@@ -120,6 +120,18 @@ class ComponentManagementTests(TestCase):
 
 
 class CustomerConfiguratorTests(TestCase):
+    def test_invalid_component_retains_other_edits(self):
+        cpu = Component.objects.create(category=Component.Category.CPU, brand="Example", model="CPU", price=100, socket="AM5")
+        gpu = Component.objects.create(category=Component.Category.GPU, brand="Example", model="Old GPU", price=100, active=False)
+        response = self.client.post(reverse("catalogue:configure"), {
+            "name": "Retain this name", "component_cpu": cpu.pk, "component_gpu": gpu.pk,
+        })
+        self.assertContains(response, "Retain this name")
+        self.assertIn("component_gpu", response.context["form"].errors)
+        cpu_row = next(row for row in response.context["rows"] if row["category"] == Component.Category.CPU)
+        self.assertEqual(cpu_row["selected"], str(cpu.pk))
+        self.assertFalse(self.client.session.get("current_build"))
+
     def test_start_new_build_requires_post_and_keeps_other_session_data(self):
         session = self.client.session
         session["current_build"] = {"name": "Old draft", "preset_id": 10, "components": []}
@@ -341,6 +353,19 @@ class PresetManagementTests(TestCase):
         self.assertEqual(Configuration.objects.count(), 0)
         self.assertContains(response, "missing required categories")
 
+    def test_component_category_edit_revalidates_published_composition(self):
+        components = self.create_components()
+        cooler = Component.objects.create(category=Component.Category.COOLER, brand="Example", model="Cooler", price=20)
+        preset = Configuration.objects.create(name="Ready", status=Configuration.Status.PUBLISHED)
+        preset.components.add(*components, cooler)
+        response = self.client.post(reverse("catalogue:component_update", args=[cooler.pk]), {
+            "category": Component.Category.GPU, "brand": cooler.brand, "model": cooler.model,
+            "price": "20.00", "active": "on", "specs": "{}",
+        }, follow=True)
+        self.assertContains(response, "Moved to Draft")
+        preset.refresh_from_db()
+        self.assertEqual(preset.status, Configuration.Status.DRAFT)
+
     def test_manager_can_publish_compatible_preset_at_shared_price(self):
         components = self.create_components()
         AssemblyFeeSetting.objects.create(fee_amount="25.00", updated_by=self.employee)
@@ -526,6 +551,14 @@ class PresetBrowseTests(TestCase):
         response = self.client.get(url, {"availability": "out_of_stock"})
         self.assertContains(response, "Low Tier")
         self.assertNotContains(response, "High Tier")
+
+    def test_rejects_nonfinite_and_reversed_price_limits(self):
+        url = reverse("catalogue:preset_list")
+        for values in ({"max_price": "Infinity"}, {"min_price": "500", "max_price": "100"}):
+            with self.subTest(values=values):
+                response = self.client.get(url, values)
+                self.assertContains(response, 'role="alert"')
+                self.assertIn("max_price", response.context["filter_form"].errors)
 
     def test_demo_drafts_are_previews_only_when_no_published_presets_exist(self):
         self.create_build("[Demo] Sample PC", status=Configuration.Status.DRAFT)

@@ -1,20 +1,22 @@
 """Run with --settings=buildwise.sqlite_test_settings to test real SQLite locks."""
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from unittest import skipIf
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import close_old_connections, connection, connections
+from django.db import close_old_connections, connection, connections, transaction
 from django.test import RequestFactory, TransactionTestCase
 from django.contrib.messages.storage.fallback import FallbackStorage
 
 from accounts.models import Customer, Employee
 from accounts.views import employee_update
-from catalogue.models import Accessory, Component
+from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration
+from catalogue.views import preset_create
 from inventory.models import Reservation, StockAdjustment
 from .models import Order, OrderLine, PurchasedPC
-from .views import _checkout_quote, checkout, order_cancel, start_order
+from .views import _cart_preview, _checkout_quote, checkout, order_cancel, start_order
 
 
 class RequestSession(dict):
@@ -59,9 +61,7 @@ class SQLiteConcurrencyTests(TransactionTestCase):
                                    [{'id': f'cart-{customer.pk}', 'kind': 'accessory', 'accessory_id': accessory.pk,
                                      'name': accessory.name, 'quantity': 1}])
             request.POST = request.POST.copy()
-            request.POST["quote"] = _checkout_quote(request.user.customer_profile, [{
-                "line": request.session["cart"][0], "items": [], "price": "20.00",
-            }])
+            request.POST["quote"] = _checkout_quote(request.user.customer_profile, _cart_preview(request.session["cart"])[0])
             return checkout(request).status_code
         self.assertEqual(self.race([lambda: buy(self.customers[0]), lambda: buy(self.customers[1])]), [302, 302])
         self.assertEqual(Order.objects.count(), 1)
@@ -76,13 +76,57 @@ class SQLiteConcurrencyTests(TransactionTestCase):
                                    [{"id": "same-cart-line", "kind": "accessory", "accessory_id": accessory.pk,
                                      "name": accessory.name, "quantity": 1}])
             request.POST = request.POST.copy()
-            request.POST["quote"] = _checkout_quote(request.user.customer_profile, [{
-                "line": request.session["cart"][0], "items": [], "price": "20.00",
-            }])
+            request.POST["quote"] = _checkout_quote(request.user.customer_profile, _cart_preview(request.session["cart"])[0])
             return checkout(request).status_code
         self.assertEqual(self.race([buy, buy]), [302, 302])
         self.assertEqual(Order.objects.count(), 1)
         self.assertEqual(Reservation.objects.filter(accessory=accessory, status="reserved").count(), 1)
+
+    def test_publishing_rechecks_components_after_waiting_for_catalogue_write(self):
+        AssemblyFeeSetting.objects.create(fee_amount=0, updated_by=self.employee)
+        specifications = {
+            "cpu": {"socket": "AM5"},
+            "motherboard": {"socket": "AM5", "memory_type": "DDR5", "form_factor": "ATX"},
+            "memory": {"memory_type": "DDR5"},
+            "gpu": {},
+            "storage": {},
+            "power_supply": {},
+            "case": {"form_factor": "ATX"},
+        }
+        parts = [
+            Component.objects.create(category=category, brand="Example", model=category, price=100, **specs)
+            for category, specs in specifications.items()
+        ]
+        data = {
+            "name": "Build waiting for publication", "status": "published",
+            "items-TOTAL_FORMS": len(parts), "items-INITIAL_FORMS": 0,
+        }
+        for index, component in enumerate(parts):
+            data[f"items-{index}-component"] = component.pk
+            data[f"items-{index}-quantity"] = 1
+
+        writer_ready = Event()
+        publisher_at_transaction = Event()
+        atomic = transaction.atomic
+
+        def signal_transaction(*args, **kwargs):
+            publisher_at_transaction.set()
+            return atomic(*args, **kwargs)
+
+        def publish():
+            self.assertTrue(writer_ready.wait(timeout=3))
+            with patch("catalogue.views.transaction.atomic", side_effect=signal_transaction):
+                return preset_create(self.request(self.employee.user, data))
+
+        def edit_component():
+            with atomic():
+                Component.objects.filter(pk=parts[0].pk).update(socket="LGA1700")
+                writer_ready.set()
+                self.assertTrue(publisher_at_transaction.wait(timeout=3))
+
+        response, _ = self.race([publish, edit_component])
+        self.assertContains(response, "does not match")
+        self.assertFalse(Configuration.objects.filter(name=data["name"], status="published").exists())
 
     def test_cancel_and_start_cannot_leave_assembling_pc_without_reservation(self):
         cpu = Component.objects.create(category=Component.Category.CPU, brand='Example', model='CPU', socket='AM5', price=100)

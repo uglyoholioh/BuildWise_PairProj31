@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer
-from catalogue.compatibility import check_configuration_components
+from catalogue.compatibility import check_configuration_components, check_preset_items
 from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from .forms import QuestionnaireForm, ShortlistForm
 from catalogue.models import Component, Configuration, ConfigurationItem, specification_fields
@@ -174,7 +174,7 @@ def recommendations(request):
     ).order_by("name")
     for configuration in configurations:
         items = list(configuration.items.all())
-        if check_configuration_components(item.component for item in items):
+        if check_preset_items(items):
             continue
         available = available_preset_quantity(items)
         if available < 1:
@@ -331,7 +331,7 @@ def compare_builds(request):
             items = _snapshot_items(saved)
         else:
             continue
-        issues = check_configuration_components(item.component for item in items)
+        issues = check_preset_items(items) if kind == "preset" else check_configuration_components(item.component for item in items)
         if kind in ("shortlist", "custom"):
             snapshot = _shortlist_build(saved) if kind == "shortlist" else saved
             missing = {part["component_id"] for part in snapshot.get("components", [])} - {item.component_id for item in items}

@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Customer, Employee, StaffAction
+from catalogue.drafts import build_revision
 from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
@@ -73,14 +74,15 @@ class CheckoutTests(TestCase):
         original.save(update_fields=["component"])
 
         cart = self.client.get(reverse("orders:cart"))
-        self.assertContains(cart, "The preset components changed")
+        self.assertContains(cart, "The build components changed")
         page = self.client.get(reverse("orders:checkout"))
         self.assertContains(page, "Removed Example gpu")
         self.assertContains(page, "Added Example Replacement GPU")
         quote = page.context["form"]["quote"].value()
         data = {"name": "Buyer", "delivery_address": "2 New Road", "quote": quote}
         response = self.submit_checkout(data, follow=True)
-        self.assertContains(response, "Preset components changed")
+        self.assertContains(response, "Build components changed")
+        self.assertContains(response, "2 New Road")
         self.assertFalse(Order.objects.exists())
         self.assertFalse(Reservation.objects.exists())
 
@@ -91,6 +93,41 @@ class CheckoutTests(TestCase):
             part["component_id"] == replacement.pk
             for part in order.lines.get().custom_snapshot["components"]
         ))
+
+    def test_price_change_before_first_cart_page_requires_review(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        Component.objects.filter(category=Component.Category.CPU).update(price=150)
+        self.client.force_login(self.user)
+        response = self.submit_checkout({"name": "Buyer", "delivery_address": "2 New Road"})
+        self.assertContains(response, "Prices changed. Review the updated total")
+        self.assertContains(response, "2 New Road")
+        self.assertFalse(Order.objects.exists())
+
+    def test_same_component_id_with_changed_specifications_requires_review(self):
+        self.client.post(reverse("orders:cart_add"), {"kind": "preset", "item_id": self.configuration.pk})
+        self.client.force_login(self.user)
+        checkout = self.client.get(reverse("orders:checkout"))
+        Component.objects.filter(category=Component.Category.GPU).update(model="New GPU description")
+        response = self.submit_checkout({
+            "name": "Buyer", "delivery_address": "2 New Road",
+            "quote": checkout.context["form"]["quote"].value(), "confirm_prices": "on",
+        })
+        self.assertContains(response, "Review the updated total")
+        self.assertContains(response, "New GPU description")
+        self.assertFalse(response.context["form"]["confirm_prices"].value())
+        self.assertFalse(Order.objects.exists())
+
+    def test_stale_configurator_tab_cannot_add_another_draft(self):
+        config_url = reverse("catalogue:configure")
+        first = self.client.get(config_url, {"preset": self.configuration.pk})
+        chosen = {f"component_{part.category}": part.pk for part in self.configuration.components.all()}
+        self.client.post(config_url, {**chosen, "name": "Another draft"})
+        response = self.client.post(reverse("orders:cart_add"), {
+            "kind": "custom", "build_revision": first.context["build_revision"],
+        }, follow=True)
+        self.assertContains(response, "Your draft changed")
+        self.assertFalse(self.client.session.get("cart"))
+        self.assertEqual(response.context["name"], "Another draft")
 
     def test_invalid_catalogue_ids_return_not_found(self):
         self.assertEqual(self.client.get(reverse("catalogue:configure"), {"preset": "abc"}).status_code, 404)
@@ -116,7 +153,7 @@ class CheckoutTests(TestCase):
         StockAdjustment.objects.create(item_type="accessory", accessory=accessory, delta=2,
                                        reason="Opening stock", created_by=self.employee)
         self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         self.client.post(reverse("orders:cart_add"), {"kind": "accessory", "item_id": accessory.pk})
         self.client.get(reverse("orders:cart"))
         self.client.force_login(self.user)
@@ -215,7 +252,7 @@ class CheckoutTests(TestCase):
             **chosen, "name": "My customised PC", "preset_id": unrelated.pk,
         })
         self.assertEqual(self.client.session["current_build"]["preset_id"], self.configuration.pk)
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         self.client.force_login(self.user)
         self.submit_checkout({"name": "Buyer", "delivery_address": "Test road", "confirm_prices": "on"})
         order = Order.objects.get()
@@ -240,9 +277,9 @@ class CheckoutTests(TestCase):
         chosen = {f"component_{part.category}": part.pk for part in self.configuration.components.all()}
         # A posted hidden ID cannot turn a scratch build into a preset purchase.
         self.client.post(reverse("catalogue:configure"), {**chosen, "preset_id": self.configuration.pk})
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         self.client.get(reverse("catalogue:configure"), {"preset": self.configuration.pk})
-        self.client.post(reverse("orders:cart_add"), {"kind": "custom"})
+        self.client.post(reverse("orders:cart_add"), {"kind": "custom", "build_revision": build_revision(self.client.session.get("current_build", {}))})
         lines = self.client.session["cart"]
         self.assertEqual(len(lines), 2)
         self.assertNotIn("source_preset_id", lines[0]["custom_snapshot"])

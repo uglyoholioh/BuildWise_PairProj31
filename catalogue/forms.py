@@ -160,3 +160,37 @@ class AssemblyFeeForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["fee_amount"].widget.attrs["class"] = "form-control"
+
+
+class BuildForm(forms.Form):
+    name = forms.CharField(max_length=160, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for category, label in Component.Category.choices:
+            self.fields[f"component_{category}"] = forms.ModelChoiceField(
+                queryset=Component.objects.filter(category=category, active=True),
+                required=False,
+                label=label,
+            )
+
+
+class PresetFilterForm(forms.Form):
+    min_price = forms.DecimalField(min_value=0, max_digits=16, decimal_places=2, required=False)
+    max_price = forms.DecimalField(min_value=0, max_digits=16, decimal_places=2, required=False)
+    tier = forms.ChoiceField(required=False)
+    availability = forms.ChoiceField(
+        choices=(("all", "All"), ("in_stock", "In stock"), ("out_of_stock", "Out of stock")),
+        required=False,
+    )
+
+    def __init__(self, *args, tiers, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["tier"].choices = [(tier, tier) for tier in tiers]
+
+    def clean(self):
+        data = super().clean()
+        minimum, maximum = data.get("min_price"), data.get("max_price")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            self.add_error("max_price", "Maximum price must be at least the minimum price.")
+        return data
