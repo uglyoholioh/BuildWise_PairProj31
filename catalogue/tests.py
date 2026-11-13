@@ -69,6 +69,14 @@ class ComponentFormTests(TestCase):
         self.assertIn("price", form.errors)
 
 
+    def test_specs_must_be_an_object_and_can_be_blank(self):
+        for value in ('[]', '"text"', '123'):
+            with self.subTest(value=value):
+                self.assertIn("specs", ComponentForm(self.data(specs=value)).errors)
+        form = ComponentForm(self.data(specs=""))
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["specs"], {})
+
 class ComponentManagementTests(TestCase):
     def setUp(self):
         user = User.objects.create_user(username="staff", password="safe-pass-123")

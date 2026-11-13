@@ -6,6 +6,16 @@ from .models import Customer, Employee
 
 
 class LoginRoutingTests(TestCase):
+    def test_empty_registration_and_profile_posts_show_required_errors(self):
+        response = self.client.post(reverse("accounts:register"), {})
+        self.assertIn("username", response.context["form"].errors)
+        user = User.objects.create_user("buyer")
+        Customer.objects.create(user=user, name="Buyer", email="buyer@example.test")
+        self.client.force_login(user)
+        response = self.client.post(reverse("accounts:profile"), {})
+        self.assertIn("name", response.context["form"].errors)
+        self.assertFalse(response.context["password_form"].is_bound)
+
     def test_protected_customer_routes_use_named_login_and_preserve_next(self):
         for path in ('/checkout', '/accounts/profile', '/orders', '/support', '/substitutions/1/decision'):
             response = self.client.post(path) if 'decision' in path else self.client.get(path)

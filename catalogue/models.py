@@ -2,6 +2,11 @@ from django.conf import settings
 from django.db import models
 
 
+def specification_fields(specs):
+    # Older component records and order snapshots can contain non-object JSON.
+    return specs if isinstance(specs, dict) else {}
+
+
 class Component(models.Model):
     class Category(models.TextChoices):
         CPU = "cpu", "CPU"

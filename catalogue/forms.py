@@ -32,6 +32,14 @@ class ComponentForm(forms.ModelForm):
                 else "form-control"
             )
 
+    def clean_specs(self):
+        specs = self.cleaned_data["specs"]
+        if specs is None:
+            return {}
+        if not isinstance(specs, dict):
+            raise ValidationError('Enter a JSON object such as {"VRAM (GB)": 8}.')
+        return specs
+
     def clean(self):
         cleaned_data = super().clean()
         for field in REQUIRED_SPECS.get(cleaned_data.get("category"), ()):

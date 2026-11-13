@@ -11,7 +11,7 @@ from catalogue.models import AssemblyFeeSetting, Component, Configuration
 from catalogue.compatibility import check_configuration_components
 from catalogue.pricing import available_preset_quantity, calculate_pc_price
 from .forms import QuestionnaireForm, ShortlistForm
-from catalogue.models import ConfigurationItem
+from catalogue.models import ConfigurationItem, specification_fields
 from inventory.availability import available_component_quantity
 from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
 from .predictor import predict_fps
@@ -374,7 +374,7 @@ def compare_builds(request):
                 f"Form factor {component.form_factor}" if component.form_factor else "",
                 f"Tier {component.ml_tier}" if component.ml_tier else "",
             ]
-            specs.extend(f"{key}: {value}" for key, value in component.specs.items())
+            specs.extend(f"{key}: {value}" for key, value in specification_fields(component.specs).items())
             specs = [value for value in specs if value]
             part = f"{component.brand} {component.model} × {item.quantity}"
             if specs:

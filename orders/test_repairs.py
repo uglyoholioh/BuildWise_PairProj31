@@ -11,9 +11,14 @@ from inventory.availability import available_component_quantity
 from .allocations import component_snapshot, expected_pc_quantities, purchased_pc_allocation_issues
 from .forms import SubstitutionProposalForm
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, SubstitutionProposal, QualityCheck
+from .substitutions import specification_rows
 
 
 class SubstitutionRepairTests(TestCase):
+    def test_legacy_non_object_specs_do_not_break_replacement_comparison(self):
+        rows = specification_rows({"specs": ["legacy"]}, {"specs": {"VRAM (GB)": 8}})
+        self.assertEqual(rows, [{"label": "VRAM (GB)", "original": None, "replacement": 8, "changed": True}])
+
     def setUp(self):
         self.employee = Employee.objects.create(user=User.objects.create_user('staff'))
         self.customer = Customer.objects.create(user=User.objects.create_user('buyer'), name='Buyer', email='buyer@example.test')

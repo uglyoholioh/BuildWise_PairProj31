@@ -59,7 +59,7 @@ class CustomerLoginView(LoginView):
 
 
 def customer_register(request):
-    form = CustomerRegistrationForm(request.POST or None)
+    form = CustomerRegistrationForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         target = request.POST.get("next", "")
         with transaction.atomic():
@@ -74,17 +74,19 @@ def customer_register(request):
 @login_required
 def customer_profile(request):
     customer = get_object_or_404(Customer, user=request.user)
-    form = CustomerProfileForm(request.POST or None, instance=customer)
-    password_form = PasswordChangeForm(request.user, request.POST or None) if request.POST.get("change_password") else PasswordChangeForm(request.user)
+    submitted = request.POST if request.method == "POST" else None
+    changing_password = request.method == "POST" and "change_password" in request.POST
+    form = CustomerProfileForm(None if changing_password else submitted, instance=customer)
+    password_form = PasswordChangeForm(request.user, submitted if changing_password else None)
     for field in password_form.fields.values():
         field.widget.attrs["class"] = "form-control"
     if request.method == "POST":
-        if request.POST.get("change_password") and password_form.is_valid():
+        if changing_password and password_form.is_valid():
             password_form.save()
             update_session_auth_hash(request, request.user)
             messages.success(request, "Password changed.")
             return redirect("accounts:profile")
-        if not request.POST.get("change_password") and form.is_valid():
+        if not changing_password and form.is_valid():
             with transaction.atomic():
                 customer = form.save()
                 request.user.email = customer.email
