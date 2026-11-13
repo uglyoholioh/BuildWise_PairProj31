@@ -39,9 +39,9 @@ def review_create(request, pk):
     form = ReviewForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            # Match fulfilment's lock order and recheck eligibility at submission.
-            order = get_object_or_404(Order.objects.select_for_update(), pk=order.pk, customer__user=request.user)
-            pc = get_object_or_404(PurchasedPC.objects.select_for_update().select_related("order_line__order"), pk=pk)
+            # Recheck eligibility at submission.
+            order = get_object_or_404(Order, pk=order.pk, customer__user=request.user)
+            pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
             if not pc.review_eligible:
                 messages.error(request, "This PC is no longer eligible for a review.")
                 return redirect("orders:order_detail", pk=order.pk)
@@ -92,7 +92,7 @@ def staff_request_detail(request, pk):
     )
     if request.method == "POST":
         with transaction.atomic():
-            locked = get_object_or_404(SupportRequest.objects.select_for_update(), pk=pk)
+            locked = get_object_or_404(SupportRequest, pk=pk)
             if action == "message" and message_form.is_valid():
                 staff_only = message_form.cleaned_data["is_staff_only"]
                 if locked.status == "closed" and not staff_only:
@@ -172,7 +172,7 @@ def request_detail(request, pk):
     form = CustomerMessageForm(request.POST) if request.method == "POST" else CustomerMessageForm()
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            locked = get_object_or_404(SupportRequest.objects.select_for_update(), pk=pk, customer=customer)
+            locked = get_object_or_404(SupportRequest, pk=pk, customer=customer)
             if locked.status == "closed":
                 messages.error(request, "This conversation is closed.")
             else:

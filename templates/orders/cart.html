@@ -2,7 +2,6 @@
 {% block title %}Your cart | BuildWise{% endblock %}
 {% block content %}
 <h1 class="h3">Your cart</h1>
-{% for message in messages %}<div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %}" role="alert">{{ message }}</div>{% endfor %}
 {% if has_cart %}
   {% for row in lines %}
   <article class="card mb-3"><div class="card-body">

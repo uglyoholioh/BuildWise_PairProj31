@@ -3,7 +3,6 @@
 {% block content %}
 <h1 class="h3">My shortlist</h1>
 <p>Saved builds belong to your account. Reopening replaces the current unfinished build in this browser; your saved copy stays unchanged.</p>
-{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 <div class="d-flex gap-2 mb-4">
   <a class="btn btn-outline-primary" href="{% url 'catalogue:configure' %}">Continue current build</a>
   <a class="btn btn-outline-secondary" href="{% url 'recommendations:compare' %}">Compare selected builds</a>

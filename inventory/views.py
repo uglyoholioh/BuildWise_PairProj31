@@ -46,7 +46,7 @@ def inspect_cancelled_stock(request, pk):
 
     with transaction.atomic():
         reservation = get_object_or_404(
-            Reservation.objects.select_for_update(), pk=pk, component__isnull=False,
+            Reservation.objects, pk=pk, component__isnull=False,
             purchased_pc__status="cancelled", status=Reservation.Status.RESERVED,
         )
         quantity = form.cleaned_data["quantity"]
@@ -88,7 +88,7 @@ def adjustment_create(request):
             item_type = form.cleaned_data["item_type"]
             item = form.cleaned_data["component"] or form.cleaned_data["accessory"]
             item_model = Component if item_type == "component" else Accessory
-            locked_item = get_object_or_404(item_model.objects.select_for_update(), pk=item.pk)
+            locked_item = get_object_or_404(item_model, pk=item.pk)
             current = stock_position(item_type, locked_item)
             delta = form.cleaned_data["delta"]
             if delta < 0 and -delta > current["available"]:

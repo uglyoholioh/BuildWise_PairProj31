@@ -395,8 +395,8 @@ def propose_substitution(request, pk):
     )
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-            pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+            order = get_object_or_404(Order, pk=order_id)
+            pc = get_object_or_404(PurchasedPC, pk=pk)
             if (
                 order.payment_status != "paid"
                 or order.status in ("cancelled", "delivered", "dispatched", "packing")
@@ -407,7 +407,7 @@ def propose_substitution(request, pk):
             else:
                 original = get_object_or_404(Component, pk=form.cleaned_data["original_component"].pk)
                 replacement = get_object_or_404(
-                    Component.objects.select_for_update(), pk=form.cleaned_data["replacement_component"].pk
+                    Component.objects, pk=form.cleaned_data["replacement_component"].pk
                 )
                 problems = substitution_issues(pc, original, replacement)
                 if problems:
@@ -452,10 +452,10 @@ def decide_substitution(request, pk):
         )
         order_id = proposal.purchased_pc.order_line.order_id
         order = get_object_or_404(
-            Order.objects.select_for_update(), pk=order_id, customer__user=request.user
+            Order.objects, pk=order_id, customer__user=request.user
         )
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=proposal.purchased_pc_id)
-        proposal = get_object_or_404(SubstitutionProposal.objects.select_for_update(), pk=pk)
+        pc = get_object_or_404(PurchasedPC, pk=proposal.purchased_pc_id)
+        proposal = get_object_or_404(SubstitutionProposal, pk=pk)
         decision = request.POST.get("decision")
         if (
             proposal.status != "pending"
@@ -466,7 +466,7 @@ def decide_substitution(request, pk):
             messages.error(request, "This substitution is no longer awaiting a decision.")
         elif decision == "accept":
             replacement = get_object_or_404(
-                Component.objects.select_for_update(), pk=proposal.replacement_component_id
+                Component.objects, pk=proposal.replacement_component_id
             )
             problems = substitution_issues(pc, proposal.original_component, replacement)
             if problems:
@@ -534,7 +534,7 @@ def decide_substitution(request, pk):
                 )
                 messages.success(request, "Substitution accepted. The confirmed order price is unchanged.")
         elif decision == "decline":
-            for reservation in Reservation.objects.select_for_update().filter(
+            for reservation in Reservation.objects.filter(
                 purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
             ):
                 if proposal.previous_pc_status == "queued":
@@ -632,19 +632,19 @@ def _order_id_for_pc(pk):
 def order_cancel(request, pk):
     with transaction.atomic():
         order = get_object_or_404(
-            Order.objects.select_for_update(), pk=pk, customer__user=request.user
+            Order.objects, pk=pk, customer__user=request.user
         )
         if order.status != "placed" or order.payment_status != "paid":
             messages.error(request, "This order can no longer be cancelled.")
         else:
-            reservations = Reservation.objects.select_for_update().filter(
+            reservations = Reservation.objects.filter(
                 Q(order_line__order=order) | Q(purchased_pc__order_line__order=order),
                 status=Reservation.Status.RESERVED,
             )
             for reservation in reservations:
                 reservation.status = Reservation.Status.RELEASED
                 reservation.save(update_fields=("status",))
-            for pc in PurchasedPC.objects.select_for_update().filter(order_line__order=order):
+            for pc in PurchasedPC.objects.filter(order_line__order=order):
                 pc.status = "cancelled"
                 pc.refund_amount = pc.order_line.unit_price_snapshot
                 pc.save(update_fields=("status", "refund_amount"))
@@ -669,9 +669,9 @@ def order_cancel(request, pk):
 def start_order(request, pk):
     order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
+        order = get_object_or_404(Order, pk=order_id)
         pc = get_object_or_404(
-            PurchasedPC.objects.select_for_update().select_related("order_line"), pk=pk
+            PurchasedPC.objects.select_related("order_line"), pk=pk
         )
         if order.payment_status != "paid" or order.status in ("cancelled", "delivered"):
             messages.error(request, "This order cannot be started.")
@@ -721,8 +721,8 @@ def start_order(request, pk):
 def start_quality_check(request, pk):
     order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=order_id)
+        pc = get_object_or_404(PurchasedPC, pk=pk)
         if order.status in ("cancelled", "delivered") or pc.status != "assembling" or pc.substitutions.filter(status="pending").exists():
             messages.error(request, "This PC is not ready for quality checks.")
         else:
@@ -743,8 +743,8 @@ def start_quality_check(request, pk):
 def record_quality_check(request, pk):
     order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=order_id)
+        pc = get_object_or_404(PurchasedPC, pk=pk)
         form = QualityCheckForm(request.POST, purchased_pc=pc)
         if not form.is_valid():
             messages.error(request, "Choose a check, and include a reason when it fails.")
@@ -772,7 +772,7 @@ def record_quality_check(request, pk):
                 pc.status = "on_hold"
                 pc.hold_reason = note
                 if faulty:
-                    reservations = Reservation.objects.select_for_update().filter(
+                    reservations = Reservation.objects.filter(
                         purchased_pc=pc,
                         component=faulty,
                         status=Reservation.Status.RESERVED,
@@ -820,7 +820,7 @@ def record_quality_check(request, pk):
                     latest[row.checklist_item] = row.passed
                 required = {key for key, _ in QualityCheckForm.CHECKS}
                 if required <= latest.keys() and all(latest[key] for key in required):
-                    for reservation in Reservation.objects.select_for_update().filter(
+                    for reservation in Reservation.objects.filter(
                         purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
                     ).select_related("component"):
                         StockAdjustment.objects.create(
@@ -860,8 +860,8 @@ def hold_pc(request, pk):
         return redirect("orders:order_queue")
     order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=order_id)
+        pc = get_object_or_404(PurchasedPC, pk=pk)
         if (
             order.payment_status != "paid"
             or order.status in ("cancelled", "delivered")
@@ -886,7 +886,7 @@ def hold_pc(request, pk):
 @require_POST
 def start_packing(request, pk):
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=pk)
         lines = list(order.lines.prefetch_related("pcs"))
         eligible_status = order.status in ("placed", "in_progress")
         if order.payment_status != "paid" or not lines:
@@ -923,7 +923,7 @@ def start_packing(request, pk):
 def dispatch_order(request, pk):
     form = DispatchForm(request.POST)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=pk)
         lines = list(order.lines.prefetch_related("pcs"))
         if not form.is_valid():
             messages.error(request, "Enter valid courier and tracking details.")
@@ -936,7 +936,7 @@ def dispatch_order(request, pk):
             if issues:
                 messages.error(request, "Cannot dispatch: " + " ".join(issues))
             else:
-                reservations = Reservation.objects.select_for_update().filter(
+                reservations = Reservation.objects.filter(
                     order_line__order=order,
                     status=Reservation.Status.RESERVED,
                     accessory__isnull=False,
@@ -979,7 +979,7 @@ def dispatch_order(request, pk):
 
 
 def _confirm_delivery(request, order, confirmed_by, employee=None):
-    shipment = get_object_or_404(Shipment.objects.select_for_update(), order=order)
+    shipment = get_object_or_404(Shipment, order=order)
     if shipment.status == "dispatched":
         shipment.status = "delivered"
         shipment.delivered_at = timezone.now()
@@ -1010,7 +1010,7 @@ def _confirm_delivery(request, order, confirmed_by, employee=None):
 @require_POST
 def staff_confirm_delivery(request, pk):
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=pk)
         employee = request.user.employee_profile
         _confirm_delivery(request, order, f"staff:{employee.pk}", employee)
     return redirect("orders:order_queue")
@@ -1021,7 +1021,7 @@ def staff_confirm_delivery(request, pk):
 def confirm_receipt(request, pk):
     with transaction.atomic():
         order = get_object_or_404(
-            Order.objects.select_for_update(), pk=pk, customer__user=request.user
+            Order.objects, pk=pk, customer__user=request.user
         )
         _confirm_delivery(request, order, f"customer:{request.user.pk}")
     return redirect("orders:order_detail", pk=pk)

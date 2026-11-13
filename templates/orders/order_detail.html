@@ -2,7 +2,6 @@
 {% block title %}Order #{{ order.pk }} | BuildWise{% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-4"><div><h1 class="h3 mb-1">Order #{{ order.pk }}</h1><p class="text-body-secondary mb-0">Placed {{ order.placed_at }}</p></div><span class="badge text-bg-secondary align-self-start">{{ order.status }}</span></div>
-{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 {% if order.status == "placed" and order.payment_status == "paid" %}
   <details class="mb-3">
     <summary class="text-danger">Cancel order</summary>

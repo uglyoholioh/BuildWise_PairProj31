@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Compare builds | BuildWise{% endblock %}
 {% block content %}
-{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 {% if user.is_authenticated %}<p><a href="{% url 'recommendations:shortlist' %}">Choose from my shortlist</a></p>{% endif %}
 <div class="d-flex justify-content-between flex-wrap gap-3 mb-3"><div><h1 class="h3 mb-1">Compare builds</h1><p class="text-body-secondary mb-0">{{ builds|length }} of 3 builds selected</p></div><a class="btn btn-outline-primary align-self-start" href="{% url 'catalogue:preset_list' %}">Browse presets</a></div>
 {% if builds %}<div class="table-responsive"><table class="table table-bordered align-middle"><thead><tr><th scope="col">Comparison</th>{% for build in builds %}<th scope="col"><div>{{ build.name }}</div><form method="post" action="{% url 'recommendations:compare_remove' %}">{% csrf_token %}<input type="hidden" name="kind" value="{{ build.kind }}"><input type="hidden" name="item_id" value="{{ build.id }}"><button class="btn btn-link btn-sm p-0" type="submit">Remove</button></form></th>{% endfor %}</tr></thead><tbody>

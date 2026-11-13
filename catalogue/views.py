@@ -320,7 +320,7 @@ def compatibility_rules(request):
 def compatibility_rule_delete(request, pk):
     with transaction.atomic():
         conflict = get_object_or_404(
-            ComponentConflict.objects.select_for_update().select_related(
+            ComponentConflict.objects.select_related(
                 "component_a", "component_b"
             ),
             pk=pk,

@@ -5,9 +5,6 @@
 {% block content %}
 <div class="mb-4"><h1 class="h3 mb-1">Order queue</h1><p class="text-body-secondary mb-0">Paid orders and their confirmed allocations.</p></div>
 
-{% for message in messages %}
-  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
-{% endfor %}
 
 {% for order in orders %}
   <section class="card mb-4">

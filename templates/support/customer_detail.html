@@ -6,6 +6,5 @@
 <p>Status: {{ support_request.status }}</p>
 {% if support_request.resolution_note %}<div class="alert alert-info"><strong>Resolution:</strong> {{ support_request.resolution_note }}</div>{% endif %}
 <div class="list-group mb-4">{% for message in support_request.public_messages %}<article class="list-group-item"><div class="d-flex justify-content-between gap-2"><strong>{% if message.sender_type == "customer" %}You{% else %}BuildWise support{% endif %}</strong><time class="small text-body-secondary">{{ message.created_at }}</time></div><p class="mb-0 mt-2">{{ message.body|linebreaksbr }}</p></article>{% empty %}<div class="list-group-item">No messages yet.</div>{% endfor %}</div>
-{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 {% if support_request.status != "closed" %}<form method="post" class="card card-body">{% csrf_token %}<label class="form-label" for="id_body">Send a message</label>{{ form.body }}{% for error in form.body.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<button class="btn btn-primary align-self-start mt-3" type="submit">Send</button></form>{% endif %}
 {% endblock %}

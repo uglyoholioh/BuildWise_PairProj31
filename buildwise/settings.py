@@ -82,8 +82,6 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-        # SQLite has no row-level select_for_update locks. Reserve the writer
-        # before reading state inside atomic checkout/fulfilment/manager edits.
         'OPTIONS': {'transaction_mode': 'IMMEDIATE', 'timeout': 5},
     }
 }
