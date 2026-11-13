@@ -26,13 +26,11 @@ class SupportedGamesField(forms.ModelMultipleChoiceField):
 
 
 class QuestionnaireForm(forms.Form):
-    PERF_LEVELS = (("balanced", "Balanced (default)"),)
     games = SupportedGamesField(
         queryset=Game.objects.filter(supported_settings__isnull=False).distinct().order_by("name"),
         widget=forms.CheckboxSelectMultiple,
         required=True,
     )
-    perf_level = forms.ChoiceField(choices=PERF_LEVELS, initial="balanced")
     max_spend = forms.DecimalField(min_value=Decimal("0.01"), max_digits=10, decimal_places=2)
 
     def __init__(self, *args, initial_response=None, include_settings=True, **kwargs):
@@ -47,7 +45,6 @@ class QuestionnaireForm(forms.Form):
             selected = self.initial.get("games", previous_games)
         if initial_response:
             self.fields["max_spend"].initial = initial_response.max_spend
-            self.fields["perf_level"].initial = initial_response.perf_level
         self.game_settings = []
         # Let ModelMultipleChoiceField validate IDs before querying dynamic settings.
         try:

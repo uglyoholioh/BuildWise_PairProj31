@@ -93,6 +93,7 @@ def _comparison_selections(request):
     return valid
 
 
+@require_http_methods(["GET", "POST"])
 def questionnaire(request):
     customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
     previous = previous_response(request, customer)
@@ -100,7 +101,6 @@ def questionnaire(request):
     if previous and request.method == "GET":
         initial = {
             "games": list(previous.game_settings.values_list("game_id", flat=True)),
-            "perf_level": previous.perf_level,
             "max_spend": previous.max_spend,
         }
     form = QuestionnaireForm(
@@ -125,7 +125,6 @@ def questionnaire(request):
             if request.POST.get("action") == "settings" or needs_settings:
                 initial = dict(draft)
                 initial.update({"games": list(selection.cleaned_data["games"].values_list("pk", flat=True)),
-                                "perf_level": selection.cleaned_data["perf_level"],
                                 "max_spend": selection.cleaned_data["max_spend"]})
                 form = QuestionnaireForm(initial=initial, initial_response=previous)
                 return render(request, "recommendations/questionnaire.html", {
@@ -135,7 +134,7 @@ def questionnaire(request):
         with transaction.atomic():
             response = QuestionnaireResponse.objects.create(
                 customer=customer,
-                perf_level=form.cleaned_data["perf_level"],
+                perf_level="balanced",
                 max_spend=form.cleaned_data["max_spend"],
             )
             for game in form.cleaned_data["games"]:
@@ -168,7 +167,6 @@ def recommendations(request):
         return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False, "no_fee": True})
 
     eligible = []
-    unsupported_count = 0
     configurations = Configuration.objects.filter(status=Configuration.Status.PUBLISHED).prefetch_related(
         "items__component"
     ).order_by("name")
@@ -191,7 +189,6 @@ def recommendations(request):
                 break
             estimates.append({"setting": setting, "fps": fps, "shortfall": max(0, setting.fps_goal - fps)})
         if len(estimates) != len(settings):
-            unsupported_count += 1
             continue
         price = calculate_pc_price(items, fee.fee_amount)
         performance = sum(estimate["fps"] for estimate in estimates)
@@ -206,13 +203,13 @@ def recommendations(request):
         })
 
     affordable = [row for row in eligible if row["price"] <= questionnaire.max_spend]
-    qualifying = [row for row in eligible if row["meets_goals"]]
+    affordable_qualifying = [row for row in affordable if row["meets_goals"]]
     profiles = []
     alternatives = []
     over_budget = None
-    if any(row["meets_goals"] for row in affordable):
+    if affordable_qualifying:
         choices = [
-            ("Lowest cost meeting all goals", min((row for row in affordable if row["meets_goals"]), key=lambda row: row["price"]), "Lowest-priced available build that meets every target."),
+            ("Lowest cost meeting all goals", min(affordable_qualifying, key=lambda row: row["price"]), "Lowest-priced available build that meets every target."),
             ("Best performance within budget", min(affordable, key=lambda row: (-row["performance"], row["price"])), "Highest combined estimated FPS within your budget."),
             ("Best value", min(affordable, key=lambda row: (-row["value"], row["price"])), "Highest combined estimated FPS per dollar within your budget."),
         ]
@@ -223,19 +220,13 @@ def recommendations(request):
                 existing["reasons"].append(reason)
             else:
                 profiles.append({"row": row, "labels": [label], "reasons": [reason]})
-    elif affordable:
+    else:
         alternatives = sorted(
             affordable,
             key=lambda row: (sum(item["shortfall"] for item in row["estimates"]), row["price"]),
         )[:3]
         over_budget = min(
-            (row for row in qualifying if row["price"] > questionnaire.max_spend),
-            key=lambda row: row["price"],
-            default=None,
-        )
-    else:
-        over_budget = min(
-            (row for row in qualifying if row["price"] > questionnaire.max_spend),
+            (row for row in eligible if row["meets_goals"] and row["price"] > questionnaire.max_spend),
             key=lambda row: row["price"],
             default=None,
         )
@@ -249,7 +240,6 @@ def recommendations(request):
             "alternatives": alternatives,
             "over_budget": over_budget,
             "extra_cost": over_budget["price"] - questionnaire.max_spend if over_budget else None,
-            "unsupported_count": unsupported_count,
             "synthetic_estimates": True,
         },
     )

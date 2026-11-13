@@ -4,8 +4,6 @@
 <h1 class="h3 mb-1">Your gaming needs</h1><p class="text-body-secondary">Choose up to three games and set one budget for the complete PC. Accessories are priced separately.</p>
 <form method="post" class="card card-body">{% csrf_token %}
   {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
-  {{ form.perf_level.as_hidden }}
-  {{ form.perf_level.errors }}
   <div class="mb-4"><label class="form-label" for="id_max_spend">Maximum PC budget</label><div class="input-group"><span class="input-group-text">$</span>{{ form.max_spend }}</div>{% for error in form.max_spend.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<div class="form-text">Includes the assembly and testing fee.</div></div>
   <fieldset class="mb-3"><legend class="h5">1. Choose your games</legend><label class="form-label" for="game-search">Search supported games</label><input class="form-control mb-2" type="search" id="game-search" placeholder="Type a game name"><div id="game-options">{% for option in form.games %}<div class="game-option">{{ option }}</div>{% endfor %}</div><div class="form-text">Select no more than three.</div>{% for error in form.games.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</fieldset>
   <div class="mb-4"><button class="btn {% if game_settings %}btn-outline-primary{% else %}btn-primary{% endif %}" type="submit" name="action" value="settings" formnovalidate>Update games and settings</button></div>
