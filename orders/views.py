@@ -10,8 +10,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer, StaffAction
 from catalogue.compatibility import check_configuration_components
-from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
-from catalogue.pricing import calculate_pc_price
+from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
+from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from inventory.availability import available_accessory_quantity, available_component_quantity
 from inventory.models import Reservation, StockAdjustment
 from .allocations import (
@@ -102,7 +102,7 @@ def cart(request):
             break
         request.session["cart"] = lines
         return redirect("orders:cart")
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     display_lines = []
     total = 0
     for line in lines:
@@ -115,7 +115,7 @@ def cart(request):
         else:
             configuration, items, issues = _cart_build(line)
             price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-            stock = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
+            stock = available_preset_quantity(items) if items else 0
         quantity = line.get("quantity", 1)
         old_price = line.get("quoted_price")
         changed = price is not None and old_price is not None and str(price) != str(old_price)
@@ -172,8 +172,8 @@ def cart_add(request):
     issues = check_configuration_components(item.component for item in items)
     if kind == "custom" and len(items) != len(build.get("components", [])):
         issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
-    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0)
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    available = available_preset_quantity(items)
+    fee = current_assembly_fee()
     if issues or not items or not available or not fee:
         messages.error(request, "This build is incomplete, unavailable, incompatible, or missing a PC assembly fee.")
         return redirect("orders:cart")
@@ -210,7 +210,7 @@ def checkout(request):
     if not lines:
         messages.error(request, "Your cart is empty.")
         return redirect("orders:cart")
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     form = CheckoutForm(request.POST if request.method == "POST" else None, instance=customer)
     preview = []
     total = 0
@@ -268,7 +268,7 @@ def checkout(request):
                     return render(request, "orders/checkout.html", {
                         "form": form, "lines": preview, "total": total, "invalid": invalid,
                     })
-                current_fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+                current_fee = current_assembly_fee()
                 component_ids = sorted({item.component_id for row in preview for item in row["items"]})
                 locked = {item.pk: item for item in Component.objects.select_for_update().filter(pk__in=component_ids, active=True)}
                 if len(locked) != len(component_ids):

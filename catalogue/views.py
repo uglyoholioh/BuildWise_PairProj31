@@ -7,8 +7,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
-from accounts.models import Employee, StaffAction
-from accounts.models import Customer
+from accounts.models import StaffAction
 from accounts.views import active_manager
 from inventory.availability import available_accessory_quantity
 from .compatibility import check_compatibility, check_configuration_components, revalidate_configurations
@@ -21,9 +20,11 @@ from .forms import (
     ConfigurationItemFormSet,
 )
 from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration, ConfigurationItem
-from .pricing import available_preset_quantity, calculate_pc_price
-from inventory.availability import available_component_quantity
+from .pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from recommendations.accessories import accessory_suggestions
+from recommendations.models import GameSettingSupport
+from recommendations.predictor import predict_fps
+from recommendations.preferences import previous_response
 
 
 @require_POST
@@ -34,9 +35,6 @@ def start_new_build(request):
 
 @require_http_methods(["GET", "POST"])
 def configure(request):
-    from recommendations.models import GameSettingSupport
-    from recommendations.predictor import predict_fps
-
     session_build = request.session.get("current_build", {})
     preset_id = request.GET.get("preset") if request.method == "GET" else None
     if preset_id:
@@ -87,7 +85,7 @@ def configure(request):
         issues.append(f"Saved component #{component_id} is no longer in the catalogue. Choose a replacement or update the build to remove it.")
     fee = current_assembly_fee()
     price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items and not issues else 0
+    available = available_preset_quantity(items) if items and not issues else 0
     rows = []
     for category, label in Component.Category.choices:
         choices = list(Component.objects.filter(Q(active=True) | Q(pk__in=selected_ids), category=category).order_by("brand", "model"))
@@ -99,9 +97,7 @@ def configure(request):
             "choices": [{"component": component, "issues": check_compatibility([*other_components, component])} for component in choices],
             "selected": next((pk for pk in selected_ids if component_map.get(pk) and component_map[pk].category == category), ""),
         })
-    questionnaire = None
-    from recommendations.views import _customer, _previous_response
-    questionnaire = _previous_response(request, _customer(request))
+    questionnaire = previous_response(request)
     estimates = []
     if questionnaire and not issues:
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
@@ -311,10 +307,6 @@ def compatibility_rule_delete(request, pk):
     return redirect("catalogue:compatibility_rules")
 
 
-def current_assembly_fee():
-    return AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
-
-
 def _preset_rows(configurations):
     fee = current_assembly_fee()
     presets = []
@@ -419,26 +411,9 @@ def preset_detail(request, pk):
         status=Configuration.Status.PUBLISHED,
     )
     presets, fee = _preset_rows([configuration])
-    customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-    questionnaire = None
+    questionnaire = previous_response(request)
     game_needs = []
-    if customer:
-        from recommendations.models import GameSettingSupport
-
-        questionnaire = customer.questionnaires.order_by("-created_at", "-pk").first()
-    else:
-        from recommendations.models import GameSettingSupport, QuestionnaireResponse
-
-    if not questionnaire and request.session.get("questionnaire_response_id"):
-        from recommendations.models import QuestionnaireResponse
-
-        saved_response = QuestionnaireResponse.objects.filter(
-            pk=request.session["questionnaire_response_id"]
-        ).first()
-        if saved_response and (saved_response.customer_id is None or saved_response.customer_id == getattr(customer, "pk", None)):
-            questionnaire = saved_response
     if questionnaire:
-        from recommendations.predictor import predict_fps
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(
                 game=setting.game,

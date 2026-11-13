@@ -7,14 +7,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer
-from catalogue.models import AssemblyFeeSetting, Component, Configuration
 from catalogue.compatibility import check_configuration_components
-from catalogue.pricing import available_preset_quantity, calculate_pc_price
+from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from .forms import QuestionnaireForm, ShortlistForm
-from catalogue.models import ConfigurationItem, specification_fields
-from inventory.availability import available_component_quantity
+from catalogue.models import Component, Configuration, ConfigurationItem, specification_fields
 from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
 from .predictor import predict_fps
+from .preferences import previous_response
 
 
 @login_required
@@ -94,26 +93,9 @@ def _comparison_selections(request):
     return valid
 
 
-def _customer(request):
-    return Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-
-
-def _previous_response(request, customer):
-    if customer:
-        response = customer.questionnaires.order_by("-created_at", "-pk").first()
-        if response:
-            return response
-    response_id = request.session.get("questionnaire_response_id")
-    if response_id:
-        response = QuestionnaireResponse.objects.filter(pk=response_id).first()
-        if response and (response.customer_id is None or response.customer_id == getattr(customer, "pk", None)):
-            return response
-    return None
-
-
 def questionnaire(request):
-    customer = _customer(request)
-    previous = _previous_response(request, customer)
+    customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    previous = previous_response(request, customer)
     initial = None
     if previous and request.method == "GET":
         initial = {
@@ -177,11 +159,11 @@ def questionnaire(request):
 
 
 def recommendations(request):
-    questionnaire = _previous_response(request, _customer(request))
+    questionnaire = previous_response(request)
     if not questionnaire or not questionnaire.game_settings.exists():
         return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False})
     settings = list(questionnaire.game_settings.select_related("game").order_by("game__name"))
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     if fee is None:
         return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False, "no_fee": True})
 
@@ -319,10 +301,10 @@ def compare_remove(request):
 
 def compare_builds(request):
     selected = _comparison_selections(request)
-    questionnaire = _previous_response(request, _customer(request))
+    questionnaire = previous_response(request)
     settings = list(questionnaire.game_settings.select_related("game").order_by("game__name")) if questionnaire else []
     builds = []
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     for selection in selected:
         kind, item_id = selection.get("kind"), selection.get("id")
         if kind == "preset":
@@ -358,10 +340,7 @@ def compare_builds(request):
         price = None
         if fee and not issues:
             price = calculate_pc_price(items, fee.fee_amount)
-        available = min(
-            (available_component_quantity(item.component) // item.quantity for item in items),
-            default=0,
-        ) if items and not issues else 0
+        available = available_preset_quantity(items) if not issues else 0
         by_category = {}
         for item in items:
             label = item.component.get_category_display()
