@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -83,25 +84,30 @@ def staff_request_detail(request, pk):
         SupportRequest.objects.select_related("customer", "order").prefetch_related("messages__employee__user"),
         pk=pk,
     )
-    message_form = SupportMessageForm(request.POST if request.method == "POST" and request.POST.get("action") == "message" else None)
+    action = request.POST.get("action") if request.method == "POST" else None
+    message_form = SupportMessageForm(request.POST if action == "message" else None)
     status_form = SupportStatusForm(
-        request.POST if request.method == "POST" and request.POST.get("action") == "status" else None,
+        request.POST if action == "status" else None,
         instance=support_request,
     )
     if request.method == "POST":
         with transaction.atomic():
             locked = get_object_or_404(SupportRequest.objects.select_for_update(), pk=pk)
-            if request.POST.get("action") == "message" and message_form.is_valid():
+            if action == "message" and message_form.is_valid():
+                staff_only = message_form.cleaned_data["is_staff_only"]
+                if locked.status == "closed" and not staff_only:
+                    messages.error(request, "Reopen this conversation before sending a public reply.")
+                    return redirect("support:staff_request_detail", pk=pk)
                 SupportMessage.objects.create(
                     request=locked,
                     sender_type="employee",
                     employee=request.user.employee_profile,
-                    is_staff_only=message_form.cleaned_data["is_staff_only"],
+                    is_staff_only=staff_only,
                     body=message_form.cleaned_data["body"],
                 )
                 messages.success(request, "Reply or staff note recorded.")
                 return redirect("support:staff_request_detail", pk=pk)
-            if request.POST.get("action") == "status" and status_form.is_valid():
+            if action == "status" and status_form.is_valid():
                 old_status = locked.status
                 new_status = status_form.cleaned_data["status"]
                 locked.status = new_status
@@ -156,7 +162,10 @@ def request_create(request):
 def request_detail(request, pk):
     customer = get_object_or_404(Customer, user=request.user)
     support_request = get_object_or_404(
-        SupportRequest.objects.select_related("order").prefetch_related("messages"),
+        SupportRequest.objects.select_related("order").prefetch_related(
+            Prefetch("messages", queryset=SupportMessage.objects.filter(is_staff_only=False).order_by("created_at", "pk"),
+                     to_attr="public_messages")
+        ),
         pk=pk,
         customer=customer,
     )

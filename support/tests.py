@@ -90,6 +90,23 @@ class SupportConversationTests(TestCase):
         self.assertEqual(support_request.resolution_note, "Replacement arranged")
         self.assertEqual(StaffAction.objects.get().employee, self.employee)
 
+    def test_closed_conversation_accepts_internal_notes_only_until_reopened(self):
+        thread = SupportRequest.objects.create(
+            customer=self.customer, order=self.order, status="closed", resolution_note="Resolved",
+        )
+        url = reverse("support:staff_request_detail", args=[thread.pk])
+        self.client.force_login(self.employee.user)
+        response = self.client.post(url, {"action": "message", "body": "Public question"}, follow=True)
+        self.assertContains(response, "Reopen this conversation")
+        self.assertFalse(thread.messages.exists())
+        self.client.post(url, {"action": "message", "body": "Internal note", "is_staff_only": "on"})
+        self.client.post(url, {"action": "status", "status": "open"})
+        self.client.post(url, {"action": "message", "body": "Public question"})
+        self.client.force_login(self.customer.user)
+        response = self.client.get(reverse("support:request_detail", args=[thread.pk]))
+        self.assertEqual([message.body for message in response.context["support_request"].public_messages], ["Public question"])
+        self.assertNotContains(response, "Internal note")
+
     def test_staff_only_note_is_hidden_from_customer_and_customer_cannot_read_other_request(self):
         support_request = SupportRequest.objects.create(customer=self.customer, order=self.order)
         SupportMessage.objects.create(
