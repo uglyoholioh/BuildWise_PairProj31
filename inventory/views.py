@@ -4,12 +4,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import StaffAction
+from accounts.views import staff_required
 from catalogue.models import Accessory, Component
 from .availability import stock_position
 from .forms import CancelledStockInspectionForm, StockAdjustmentForm
 from .models import Reservation, StockAdjustment
 
 
+@staff_required
 def inventory_dashboard(request):
     components = [
         {"item": item, **stock_position("component", item)}
@@ -34,6 +36,7 @@ def inventory_dashboard(request):
     )
 
 
+@staff_required
 @require_POST
 def inspect_cancelled_stock(request, pk):
     form = CancelledStockInspectionForm(request.POST)
@@ -76,6 +79,7 @@ def inspect_cancelled_stock(request, pk):
     return redirect("inventory:inventory_dashboard")
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def adjustment_create(request):
     form = StockAdjustmentForm(request.POST if request.method == "POST" else None)

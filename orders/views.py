@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer, StaffAction
+from accounts.views import staff_required
 from catalogue.compatibility import check_configuration_components, check_preset_items
 from catalogue.drafts import build_revision
 from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
@@ -383,6 +384,7 @@ def order_list(request):
     return render(request, "orders/order_list.html", {"orders": orders})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def propose_substitution(request, pk):
     order_id = _order_id_for_pc(pk)
@@ -578,6 +580,7 @@ def quality_check_revision(pc):
     return f"{check or 0}:{approval or 0}"
 
 
+@staff_required
 def order_queue(request):
     orders = list(
         Order.objects.filter(payment_status="paid")
@@ -661,6 +664,7 @@ def order_cancel(request, pk):
     return redirect("orders:order_list")
 
 
+@staff_required
 @require_POST
 def start_order(request, pk):
     order_id = _order_id_for_pc(pk)
@@ -712,6 +716,7 @@ def start_order(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def start_quality_check(request, pk):
     order_id = _order_id_for_pc(pk)
@@ -733,6 +738,7 @@ def start_quality_check(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def record_quality_check(request, pk):
     order_id = _order_id_for_pc(pk)
@@ -845,6 +851,7 @@ def record_quality_check(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def hold_pc(request, pk):
     form = HoldPCForm(request.POST)
@@ -875,6 +882,7 @@ def hold_pc(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def start_packing(request, pk):
     with transaction.atomic():
@@ -910,6 +918,7 @@ def start_packing(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def dispatch_order(request, pk):
     form = DispatchForm(request.POST)
@@ -997,6 +1006,7 @@ def _confirm_delivery(request, order, confirmed_by, employee=None):
         messages.info(request, "This delivery has already been confirmed or is not dispatched.")
 
 
+@staff_required
 @require_POST
 def staff_confirm_delivery(request, pk):
     with transaction.atomic():

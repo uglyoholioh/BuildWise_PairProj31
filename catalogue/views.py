@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import StaffAction
-from accounts.views import active_manager
+from accounts.views import active_manager, staff_required
 from inventory.availability import available_accessory_quantity
 from support.models import Review
 from .compatibility import check_compatibility, check_configuration_components, check_preset_items, revalidate_configurations
@@ -150,6 +150,7 @@ def configure(request):
     })
 
 
+@staff_required
 def component_list(request):
     return render(
         request,
@@ -158,6 +159,7 @@ def component_list(request):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def component_create(request):
     form = ComponentForm(request.POST if request.method == "POST" else None)
@@ -175,6 +177,7 @@ def component_create(request):
     return render(request, "catalogue/component_form.html", {"form": form, "title": "Add component"})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def component_update(request, pk):
     component = get_object_or_404(Component, pk=pk)
@@ -205,6 +208,7 @@ def component_update(request, pk):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_manage_list(request):
     accessories = [
@@ -231,6 +235,7 @@ def accessory_list(request):
     })
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_create(request):
     form = AccessoryForm(request.POST if request.method == "POST" else None)
@@ -248,6 +253,7 @@ def accessory_create(request):
     return render(request, "catalogue/accessory_form.html", {"form": form, "title": "Add accessory"})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_update(request, pk):
     accessory = get_object_or_404(Accessory, pk=pk)
@@ -276,6 +282,7 @@ def accessory_update(request, pk):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def compatibility_rules(request):
     form = ComponentConflictForm(request.POST if request.method == "POST" else None)
@@ -308,6 +315,7 @@ def compatibility_rules(request):
     )
 
 
+@staff_required
 @require_POST
 def compatibility_rule_delete(request, pk):
     with transaction.atomic():
@@ -350,6 +358,7 @@ def _preset_rows(configurations):
     return presets, fee
 
 
+@staff_required
 def preset_manage_list(request):
     presets, fee = _preset_rows(
         Configuration.objects.prefetch_related("items__component").order_by("name")
@@ -499,11 +508,13 @@ def _edit_preset(request, pk=None):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def preset_create(request):
     return _edit_preset(request)
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def preset_update(request, pk):
     return _edit_preset(request, pk)

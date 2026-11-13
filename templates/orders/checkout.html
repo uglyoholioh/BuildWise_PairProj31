@@ -7,7 +7,7 @@
 <ul>
   {% for row in lines %}
     <li>
-      {{ row.line.name }} × {{ row.line.quantity }} — {% if row.price != None %}${{ row.price }} each{% else %}Unavailable{% endif %}
+      {% if row.accessory %}{{ row.accessory.name }} · {{ row.accessory.category }}{% else %}{{ row.line.name }}{% endif %} × {{ row.line.quantity }} — {% if row.price != None %}${{ row.price }} each{% else %}Unavailable{% endif %}
       {% if row.changed %}<span class="text-warning-emphasis"> (price review required)</span>{% endif %}
       {% if row.removed or row.added %}
         <div class="alert alert-warning py-2 mt-2">

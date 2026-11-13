@@ -3,7 +3,6 @@ from django.db import models
 
 
 def specification_fields(specs):
-    # Older component records and order snapshots can contain non-object JSON.
     return specs if isinstance(specs, dict) else {}
 
 
