@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
@@ -41,6 +41,10 @@ def start_new_build(request):
 @require_http_methods(["GET", "POST"])
 def configure(request):
     session_build = request.session.get("current_build", {})
+    action = request.POST.get("action")
+    if action == "complete" and request.POST.get("build_revision") != build_revision(session_build):
+        messages.error(request, "Your current build changed. Review the selections before saving.")
+        return redirect("catalogue:configure")
     preset_id = request.GET.get("preset") if request.method == "GET" else None
     if preset_id:
         try:
@@ -81,7 +85,6 @@ def configure(request):
             "components": [{"component_id": pk, "quantity": quantity} for pk, quantity in selected_ids.items()],
         }
         request.session["current_build"] = session_build
-        action = request.POST.get("action")
         if action == "shortlist":
             return redirect("recommendations:shortlist_save")
         if action != "complete":
@@ -475,20 +478,23 @@ def _edit_preset(request, pk=None):
             form_valid = form.is_valid()
             items_valid = formset.is_valid()
             if form_valid and items_valid:
-                if form.cleaned_data["status"] == Configuration.Status.PUBLISHED:
-                    items = []
-                    for item_form in formset.forms:
-                        data = item_form.cleaned_data
-                        if data.get("component") and not data.get("DELETE"):
-                            items.append(ConfigurationItem(component=data["component"], quantity=data["quantity"]))
-                    if current_assembly_fee() is None:
-                        form.add_error("status", "Set the shared assembly fee before publishing a preset.")
-                    for issue in check_preset_items(items):
-                        form.add_error(None, issue)
+                publishing = form.cleaned_data["status"] == Configuration.Status.PUBLISHED
+                if publishing and current_assembly_fee() is None:
+                    form.add_error("status", "Set the shared assembly fee before publishing a preset.")
                 if not form.errors:
-                    configuration = form.save()
-                    formset.instance = configuration
-                    formset.save()
+                    try:
+                        with transaction.atomic():
+                            configuration = form.save()
+                            formset.instance = configuration
+                            formset.save()
+                            if publishing:
+                                for issue in check_preset_items(configuration.items.select_related("component")):
+                                    form.add_error(None, issue)
+                                if form.errors:
+                                    transaction.set_rollback(True)
+                    except IntegrityError:
+                        form.add_error(None, "These component rows could not be saved. Reload the preset and try again.")
+                if not form.errors:
                     StaffAction.objects.create(
                         employee=request.user.employee_profile,
                         action_type="configuration_created" if creating else "configuration_updated",

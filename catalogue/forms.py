@@ -133,6 +133,10 @@ class BaseConfigurationItemFormSet(BaseInlineFormSet):
         super().clean()
         if any(self.errors):
             return
+        existing_ids = set(self.get_queryset().values_list("pk", flat=True))
+        submitted_ids = [form.instance.pk for form in self.initial_forms]
+        if len(submitted_ids) != len(existing_ids) or set(submitted_ids) != existing_ids:
+            raise ValidationError("The preset rows have changed. Reload this page before saving.")
         selected = [
             form.cleaned_data["component"]
             for form in self.forms
