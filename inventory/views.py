@@ -1,6 +1,5 @@
 from django.contrib import messages
 from django.db import transaction
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -9,10 +8,6 @@ from catalogue.models import Accessory, Component
 from .availability import stock_position
 from .forms import CancelledStockInspectionForm, StockAdjustmentForm
 from .models import Reservation, StockAdjustment
-
-
-def placeholder(request, *args, **kwargs):
-    return HttpResponse("Page under construction")
 
 
 def inventory_dashboard(request):

@@ -17,10 +17,6 @@ from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireR
 from .predictor import predict_fps
 
 
-def placeholder(request, *args, **kwargs):
-    return render(request, "recommendations/placeholder.html")
-
-
 @login_required
 def shortlist(request):
     customer = get_object_or_404(Customer, user=request.user)

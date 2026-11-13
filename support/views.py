@@ -64,10 +64,6 @@ def review_create(request, pk):
     return render(request, "support/review_form.html", {"pc": pc, "form": form})
 
 
-def placeholder(request, *args, **kwargs):
-    return render(request, "support/placeholder.html")
-
-
 @staff_required
 def staff_request_list(request):
     requests = SupportRequest.objects.select_related("customer", "order").order_by("-created_at", "-pk")

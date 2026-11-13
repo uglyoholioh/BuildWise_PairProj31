@@ -8,7 +8,6 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST, require_http_methods
 
@@ -45,17 +44,13 @@ class EmployeeAuthenticationForm(AuthenticationForm):
 class StaffLoginView(LoginView):
     template_name = "accounts/staff_login.html"
     authentication_form = EmployeeAuthenticationForm
-
-    def get_success_url(self):
-        return self.get_redirect_url() or reverse("inventory:inventory_dashboard")
+    next_page = "inventory:inventory_dashboard"
 
 
 class CustomerLoginView(LoginView):
     template_name = "accounts/customer_login.html"
     authentication_form = CustomerAuthenticationForm
-
-    def get_success_url(self):
-        return self.get_redirect_url() or reverse("accounts:profile")
+    next_page = "accounts:profile"
 
 
 def customer_register(request):
@@ -65,7 +60,7 @@ def customer_register(request):
         with transaction.atomic():
             user = form.save()
         login(request, user)
-        if target and url_has_allowed_host_and_scheme(target, allowed_hosts={request.get_host()}):
+        if target and url_has_allowed_host_and_scheme(target, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
             return redirect(target)
         return redirect("accounts:profile")
     return render(request, "accounts/customer_register.html", {"form": form, "next": request.GET.get("next", "")})

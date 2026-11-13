@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth.decorators import user_passes_test
 from django.db import transaction
 from django.db.models import Q
-from django.http import Http404, HttpResponse
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -24,10 +24,6 @@ from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict,
 from .pricing import available_preset_quantity, calculate_pc_price
 from inventory.availability import available_component_quantity
 from recommendations.accessories import accessory_suggestions
-
-
-def placeholder(request, *args, **kwargs):
-    return HttpResponse("Page under construction")
 
 
 @require_POST
