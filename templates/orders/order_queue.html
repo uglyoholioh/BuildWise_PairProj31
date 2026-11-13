@@ -54,6 +54,7 @@
                   {% if pc.status == "quality_checking" or pc.status == "corrective_work" %}
                     <form class="row g-2 mt-2" method="post" action="{% url 'orders:record_quality_check' pc.pk %}">
                       {% csrf_token %}
+                      <input type="hidden" name="revision" value="{{ pc.quality_check_revision }}">
                       <div class="col-md-4"><label class="form-label small" for="check-{{ pc.pk }}">Check</label><select class="form-select form-select-sm" id="check-{{ pc.pk }}" name="checklist_item"><option value="installed_parts">Installed parts</option><option value="startup">Successful startup</option><option value="stability">Basic stability</option></select></div>
                       <div class="col-md-2"><label class="form-label small" for="result-{{ pc.pk }}">Result</label><select class="form-select form-select-sm" id="result-{{ pc.pk }}" name="passed"><option value="yes">Pass</option><option value="no">Fail</option></select></div>
                       <div class="col-md-3"><label class="form-label small" for="fault-{{ pc.pk }}">Faulty component, if known</label><select class="form-select form-select-sm" id="fault-{{ pc.pk }}" name="faulty_component"><option value="">Not applicable</option>{% for reservation in pc.reservations.all %}{% if reservation.component and reservation.status == "reserved" %}<option value="{{ reservation.component_id }}">{{ reservation.component }}</option>{% endif %}{% endfor %}</select></div>

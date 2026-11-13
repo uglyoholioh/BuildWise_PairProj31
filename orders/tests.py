@@ -10,6 +10,7 @@ from catalogue.drafts import build_revision
 from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
 from inventory.models import Reservation, StockAdjustment
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
+from .views import quality_check_revision
 
 
 class CheckoutTests(TestCase):
@@ -692,7 +693,7 @@ class OrderQueueTests(TestCase):
         for item in ("installed_parts", "startup", "stability"):
             response = self.client.post(
                 reverse("orders:record_quality_check", args=[pc.pk]),
-                {"checklist_item": item, "passed": "yes", "note": "Verified"},
+                {"revision": quality_check_revision(pc), "checklist_item": item, "passed": "yes", "note": "Verified"},
             )
             self.assertEqual(response.status_code, 302)
 
@@ -705,7 +706,7 @@ class OrderQueueTests(TestCase):
         )
         self.client.post(
             reverse("orders:record_quality_check", args=[pc.pk]),
-            {"checklist_item": "stability", "passed": "yes"},
+            {"revision": quality_check_revision(pc), "checklist_item": "stability", "passed": "yes"},
         )
         self.assertEqual(
             StockAdjustment.objects.filter(reason__contains="passed quality checks").count(), 1
@@ -724,6 +725,7 @@ class OrderQueueTests(TestCase):
         self.client.post(
             reverse("orders:record_quality_check", args=[pc.pk]),
             {
+                "revision": quality_check_revision(pc),
                 "checklist_item": "installed_parts", "passed": "no",
                 "faulty_component": self.component.pk, "note": "Fan does not spin",
             },
@@ -736,6 +738,37 @@ class OrderQueueTests(TestCase):
         self.assertEqual(reservation.status, Reservation.Status.RELEASED)
         self.assertEqual(StockAdjustment.objects.order_by("-pk").first().delta, -1)
 
+    def test_repeated_failure_cannot_write_off_another_unit_or_reuse_old_passes(self):
+        _, pc = self.create_paid_build_pc()
+        StockAdjustment.objects.create(
+            item_type="component", component=self.component, delta=3,
+            reason="Opening stock", created_by=self.employee,
+        )
+        self.client.post(reverse("orders:start_order", args=[pc.pk]))
+        self.client.post(reverse("orders:start_quality_check", args=[pc.pk]))
+        url = reverse("orders:record_quality_check", args=[pc.pk])
+        for check in ("startup", "stability"):
+            self.client.post(url, {
+                "revision": quality_check_revision(pc), "checklist_item": check, "passed": "yes",
+            })
+        page = self.client.get(reverse("orders:order_queue"))
+        revision = quality_check_revision(pc)
+        self.assertContains(page, f'name="revision" value="{revision}"')
+        failure = {
+            "revision": revision, "checklist_item": "installed_parts", "passed": "no",
+            "faulty_component": self.component.pk, "note": "CPU failed",
+        }
+        self.client.post(url, failure)
+        self.client.post(url, failure)
+        self.assertEqual(pc.quality_checks.filter(passed=False).count(), 1)
+        self.assertEqual(StockAdjustment.objects.filter(reason__startswith="Faulty part removed").count(), 1)
+        self.client.post(url, {
+            "revision": quality_check_revision(pc), "checklist_item": "installed_parts", "passed": "yes",
+        })
+        pc.refresh_from_db()
+        self.assertEqual(pc.status, "quality_checking")
+        self.assertTrue(pc.reservations.filter(status=Reservation.Status.RESERVED).exists())
+
     def test_failed_faulty_part_with_spare_stock_enters_corrective_work_and_can_pass_retest(self):
         _, pc = self.create_paid_build_pc()
         StockAdjustment.objects.create(
@@ -747,6 +780,7 @@ class OrderQueueTests(TestCase):
         self.client.post(
             reverse("orders:record_quality_check", args=[pc.pk]),
             {
+                "revision": quality_check_revision(pc),
                 "checklist_item": "installed_parts", "passed": "no",
                 "faulty_component": self.component.pk, "note": "First unit was faulty",
             },
@@ -757,7 +791,7 @@ class OrderQueueTests(TestCase):
         for item in ("installed_parts", "startup", "stability"):
             self.client.post(
                 reverse("orders:record_quality_check", args=[pc.pk]),
-                {"checklist_item": item, "passed": "yes", "note": "Retested"},
+                {"revision": quality_check_revision(pc), "checklist_item": item, "passed": "yes", "note": "Retested"},
             )
 
         pc.refresh_from_db()

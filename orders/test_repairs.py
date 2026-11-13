@@ -12,6 +12,7 @@ from .allocations import component_snapshot, expected_pc_quantities, purchased_p
 from .forms import SubstitutionProposalForm
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, SubstitutionProposal, QualityCheck
 from .substitutions import specification_rows
+from .views import quality_check_revision
 
 
 class SubstitutionRepairTests(TestCase):
@@ -140,11 +141,11 @@ class SubstitutionRepairTests(TestCase):
         self.client.post(reverse("orders:start_order", args=[self.pc.pk]))
         self.client.post(reverse("orders:start_quality_check", args=[self.pc.pk]))
         for check in ("installed_parts", "startup"):
-            self.client.post(reverse("orders:record_quality_check", args=[self.pc.pk]), {"checklist_item": check, "passed": "yes"})
+            self.client.post(reverse("orders:record_quality_check", args=[self.pc.pk]), {"revision": quality_check_revision(self.pc), "checklist_item": check, "passed": "yes"})
         self.propose()
         self.decide()
         self.client.force_login(self.employee.user)
-        self.client.post(reverse("orders:record_quality_check", args=[self.pc.pk]), {"checklist_item": "stability", "passed": "yes"})
+        self.client.post(reverse("orders:record_quality_check", args=[self.pc.pk]), {"revision": quality_check_revision(self.pc), "checklist_item": "stability", "passed": "yes"})
         self.pc.refresh_from_db()
         self.assertEqual(self.pc.status, "quality_checking")
         self.assertFalse(Reservation.objects.filter(purchased_pc=self.pc, status="consumed").exists())
@@ -165,6 +166,7 @@ class SubstitutionRepairTests(TestCase):
         StockAdjustment.objects.create(item_type='component', component=self.cpu, delta=-3,
                                        reason='No unreserved spare', created_by=self.employee)
         self.client.post(reverse('orders:record_quality_check', args=[self.pc.pk]), {
+            "revision": quality_check_revision(self.pc),
             'checklist_item': 'startup', 'passed': 'no', 'faulty_component': self.cpu.pk, 'note': 'Faulty CPU',
         })
         self.pc.refresh_from_db()
@@ -176,7 +178,7 @@ class SubstitutionRepairTests(TestCase):
         self.assertEqual(purchased_pc_allocation_issues(self.pc), [])
         self.client.force_login(self.employee.user)
         for check in ('installed_parts', 'startup', 'stability', 'stability'):
-            self.client.post(reverse('orders:record_quality_check', args=[self.pc.pk]), {'checklist_item': check, 'passed': 'yes'})
+            self.client.post(reverse('orders:record_quality_check', args=[self.pc.pk]), {"revision": quality_check_revision(self.pc), 'checklist_item': check, 'passed': 'yes'})
         self.pc.refresh_from_db()
         self.assertEqual(self.pc.status, 'quality_passed')
         self.assertEqual(Reservation.objects.filter(purchased_pc=self.pc, status='consumed').count(), 7)
@@ -383,6 +385,8 @@ class SubstitutionRepairTests(TestCase):
         page = self.client.get(reverse("orders:order_detail", args=[self.order.pk]))
         self.assertNotContains(page, "Accept replacement")
         self.assertNotContains(page, "Decline and refund this PC")
+        self.assertContains(page, "This proposal closed when the order was cancelled.")
+        self.assertEqual(self.pc.substitutions.get().status, "cancelled")
         self.decide()
         self.assertFalse(self.pc.substitutions.filter(status="accepted").exists())
 
@@ -458,7 +462,7 @@ class IntegratedPurchaseTests(TestCase):
         self.client.post(reverse('orders:start_order', args=[pc.pk]))
         self.client.post(reverse('orders:start_quality_check', args=[pc.pk]))
         for check in ('installed_parts', 'startup', 'stability'):
-            self.client.post(reverse('orders:record_quality_check', args=[pc.pk]), {'checklist_item': check, 'passed': 'yes'})
+            self.client.post(reverse('orders:record_quality_check', args=[pc.pk]), {"revision": quality_check_revision(pc), 'checklist_item': check, 'passed': 'yes'})
         pc.refresh_from_db()
         self.assertEqual(pc.status, 'quality_passed')
         self.client.post(reverse('orders:start_packing', args=[order.pk]))
