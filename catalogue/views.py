@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Employee, StaffAction
 from accounts.models import Customer
@@ -28,6 +28,12 @@ from recommendations.accessories import accessory_suggestions
 
 def placeholder(request, *args, **kwargs):
     return HttpResponse("Page under construction")
+
+
+@require_POST
+def start_new_build(request):
+    request.session.pop("current_build", None)
+    return redirect("catalogue:configure")
 
 
 @require_http_methods(["GET", "POST"])
@@ -161,7 +167,7 @@ def component_update(request, pk):
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             component = form.save()
-            revalidate_configurations([component])
+            moved_to_draft = revalidate_configurations([component])
             if old_active != component.active:
                 action_type = "component_deactivated" if not component.active else "component_reactivated"
             else:
@@ -173,6 +179,8 @@ def component_update(request, pk):
                 detail=f"Updated {component.category}: {component.brand} {component.model}.",
             )
         messages.success(request, "Component updated.")
+        if moved_to_draft:
+            messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
         return redirect("catalogue:component_list")
     return render(
         request,
@@ -258,7 +266,7 @@ def compatibility_rules(request):
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             conflict = form.save()
-            revalidate_configurations([conflict.component_a, conflict.component_b])
+            moved_to_draft = revalidate_configurations([conflict.component_a, conflict.component_b])
             StaffAction.objects.create(
                 employee=request.user.employee_profile,
                 action_type="component_conflict_added",
@@ -269,6 +277,8 @@ def compatibility_rules(request):
                 ),
             )
         messages.success(request, "Compatibility rule added.")
+        if moved_to_draft:
+            messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
         return redirect("catalogue:compatibility_rules")
     return render(
         request,
@@ -399,6 +409,8 @@ def preset_list(request):
             "tiers": tiers,
             "availability": availability,
             "filter_error": filter_error,
+            "has_build_draft": bool(request.session.get("current_build", {}).get("components")
+                                    or request.session.get("current_build", {}).get("preset_id")),
         },
     )
 

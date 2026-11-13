@@ -94,11 +94,14 @@ def check_configuration(configuration):
 def revalidate_configurations(components):
     component_ids = [component.pk for component in components if component.pk]
     if not component_ids:
-        return
+        return []
     affected = Configuration.objects.filter(
         status=Configuration.Status.PUBLISHED, components__pk__in=component_ids
     ).distinct()
+    moved_to_draft = []
     for configuration in affected:
         if check_configuration(configuration):
             configuration.status = Configuration.Status.DRAFT
             configuration.save(update_fields=("status",))
+            moved_to_draft.append(configuration.name)
+    return moved_to_draft

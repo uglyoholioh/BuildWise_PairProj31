@@ -68,7 +68,6 @@ class ComponentFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("price", form.errors)
 
-
     def test_specs_must_be_an_object_and_can_be_blank(self):
         for value in ('[]', '"text"', '123'):
             with self.subTest(value=value):
@@ -76,6 +75,7 @@ class ComponentFormTests(TestCase):
         form = ComponentForm(self.data(specs=""))
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["specs"], {})
+
 
 class ComponentManagementTests(TestCase):
     def setUp(self):
@@ -120,6 +120,19 @@ class ComponentManagementTests(TestCase):
 
 
 class CustomerConfiguratorTests(TestCase):
+    def test_start_new_build_requires_post_and_keeps_other_session_data(self):
+        session = self.client.session
+        session["current_build"] = {"name": "Old draft", "preset_id": 10, "components": []}
+        session["completed_builds"] = [{"name": "Compared build"}]
+        session.save()
+        url = reverse("catalogue:start_new_build")
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.session["current_build"]["name"], "Old draft")
+        response = self.client.post(url)
+        self.assertRedirects(response, reverse("catalogue:configure"), fetch_redirect_response=False)
+        self.assertNotIn("current_build", self.client.session)
+        self.assertEqual(self.client.session["completed_builds"], [{"name": "Compared build"}])
+
     def test_saving_legacy_preset_keeps_both_storage_models(self):
         first, second = [
             Component.objects.create(category=Component.Category.STORAGE, brand="Example", model=name, price=100)
@@ -261,9 +274,10 @@ class CompatibilityCheckerTests(TestCase):
                 "specs": "{}",
             },
         )
-        self.assertRedirects(response, reverse("catalogue:component_list"))
+        self.assertRedirects(response, reverse("catalogue:component_list"), fetch_redirect_response=False)
         preset.refresh_from_db()
         self.assertEqual(preset.status, Configuration.Status.DRAFT)
+        self.assertContains(self.client.get(reverse("catalogue:component_list")), "Moved to Draft in Manage PC presets: Test preset.")
 
 
 class PresetManagementTests(TestCase):

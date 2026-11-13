@@ -4,6 +4,16 @@
 <h1 class="h3">Configure a PC</h1>
 {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 <p class="text-body-secondary">Choose one active component per category. Your selections are kept in this browser session.</p>
+{% if items or preset_id %}
+  <details class="mb-4">
+    <summary>Start a new build</summary>
+    <form method="post" action="{% url 'catalogue:start_new_build' %}" class="mt-2">
+      {% csrf_token %}
+      <p class="small mb-2">This replaces your current draft. You can save it to your shortlist first.</p>
+      <button class="btn btn-outline-secondary btn-sm" type="submit">Clear draft and start new build</button>
+    </form>
+  </details>
+{% endif %}
 <form method="post" class="card card-body mb-4">
   {% csrf_token %}
   <label class="form-label" for="build-name">Build name</label>
