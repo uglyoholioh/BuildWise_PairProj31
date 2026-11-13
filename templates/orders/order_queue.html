@@ -27,13 +27,17 @@
             {% if line.kind == "build" %}
               {% for pc in line.pcs.all %}
                 <div class="border rounded p-3 mt-3">
-                  <div class="d-flex flex-wrap justify-content-between gap-2"><strong>PC #{{ pc.pk }} (unit {{ pc.unit_index }}) · {{ pc.status }}</strong>{% if pc.hold_reason %}<span class="text-danger">{{ pc.hold_reason }}</span>{% endif %}</div>
+                  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <strong>PC #{{ pc.pk }} (unit {{ pc.unit_index }})</strong>
+                    {% if pc.has_pending_substitution %}<span class="badge text-bg-warning">Awaiting customer approval</span>
+                    {% elif pc.status == "quality_passed" %}<span class="badge text-bg-success">Quality checks passed</span>
+                    {% elif pc.status == "on_hold" %}<span class="badge text-bg-warning">On hold</span>
+                    {% elif pc.status == "quality_checking" %}<span class="badge text-bg-secondary">Quality checks in progress</span>
+                    {% elif pc.status == "corrective_work" %}<span class="badge text-bg-warning">Corrective work</span>
+                    {% else %}<span class="badge text-bg-secondary">{{ pc.status|capfirst }}</span>{% endif %}
+                  </div>
+                  {% if pc.hold_reason %}<p class="text-danger mb-2">{{ pc.hold_reason }}</p>{% endif %}
                   {% if pc.allocation_issues %}<ul class="small text-danger mt-2 mb-2">{% for issue in pc.allocation_issues %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
-                  <ul class="small mb-3">
-                    {% for reservation in pc.reservations.all %}
-                      <li>{% if reservation.component %}{{ reservation.component }}{% else %}{{ reservation.accessory }}{% endif %} × {{ reservation.quantity }} · {{ reservation.status }}</li>
-                    {% empty %}<li>No allocations recorded.</li>{% endfor %}
-                  </ul>
                   <div class="d-flex flex-wrap gap-2">
                     {% if not pc.has_pending_substitution %}
                     {% if pc.status == "queued" or pc.status == "on_hold" %}
@@ -58,6 +62,14 @@
                     </form>
                   {% endif %}
                   {% endif %}
+                  <details class="mt-2">
+                    <summary>Component allocations</summary>
+                    <ul class="small mb-0 mt-2">
+                      {% for reservation in pc.reservations.all %}
+                        <li>{% if reservation.component %}{{ reservation.component }}{% else %}{{ reservation.accessory }}{% endif %} × {{ reservation.quantity }} · {{ reservation.status }}</li>
+                      {% empty %}<li>No allocations recorded.</li>{% endfor %}
+                    </ul>
+                  </details>
                 </div>
               {% empty %}<p class="small text-body-secondary mb-0">No PC units have been created for this line.</p>{% endfor %}
             {% else %}

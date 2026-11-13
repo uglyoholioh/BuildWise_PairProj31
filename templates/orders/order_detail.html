@@ -3,7 +3,16 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-4"><div><h1 class="h3 mb-1">Order #{{ order.pk }}</h1><p class="text-body-secondary mb-0">Placed {{ order.placed_at }}</p></div><span class="badge text-bg-secondary align-self-start">{{ order.status }}</span></div>
 {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
-{% if order.status == "placed" and order.payment_status == "paid" %}<form class="mb-3" method="post" action="{% url 'orders:order_cancel' order.pk %}">{% csrf_token %}<button class="btn btn-outline-danger" type="submit">Cancel order and record simulated refund</button></form>{% endif %}
+{% if order.status == "placed" and order.payment_status == "paid" %}
+  <details class="mb-3">
+    <summary class="text-danger">Cancel order</summary>
+    <form class="mt-2" method="post" action="{% url 'orders:order_cancel' order.pk %}">
+      {% csrf_token %}
+      <p>Cancel the entire order and release its reserved stock.</p>
+      <button class="btn btn-outline-danger" type="submit">Cancel order and record simulated refund</button>
+    </form>
+  </details>
+{% endif %}
 <div class="card mb-4"><div class="card-body"><strong>Payment {{ order.payment_status }} · Total ${{ order.total_snapshot }}</strong>{% if order.shipment %}<p class="mb-0 mt-2">Shipment {{ order.shipment.status }}{% if order.shipment.courier %} · {{ order.shipment.courier }}{% endif %}{% if order.shipment.tracking_ref %} · Tracking {{ order.shipment.tracking_ref }}{% endif %}{% if order.shipment.delivered_at %} · Delivered {{ order.shipment.delivered_at }} (confirmed by {{ order.shipment.confirmed_by }}){% endif %}</p>{% endif %}</div></div>
 {% for line in order.lines.all %}<section class="card mb-4"><div class="card-header"><strong>{{ line.name }} × {{ line.quantity }}</strong> · ${{ line.unit_price_snapshot }} each</div><div class="card-body">
   {% if line.kind == "accessory" %}<p>{{ line.custom_snapshot.accessory.category }} · {{ line.name }} · {% for reservation in line.reservations.all %}{{ reservation.status }}{% endfor %}</p>{% endif %}
