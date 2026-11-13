@@ -135,5 +135,10 @@ class SupportConversationTests(TestCase):
         support_request.resolution_note = "Resolved"
         support_request.save(update_fields=("status", "resolution_note"))
         self.assertNotContains(self.client.get(reverse("support:request_detail", args=[support_request.pk])), "Send a message")
-        self.client.post(reverse("support:request_detail", args=[support_request.pk]), {"body": "A late reply"})
+        response = self.client.post(
+            reverse("support:request_detail", args=[support_request.pk]),
+            {"body": "A late reply"},
+            follow=True,
+        )
+        self.assertContains(response, "This conversation is closed.")
         self.assertFalse(support_request.messages.filter(body="A late reply").exists())

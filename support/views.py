@@ -141,14 +141,15 @@ def request_create(request):
     customer = get_object_or_404(Customer, user=request.user)
     form = SupportRequestForm(request.POST if request.method == "POST" else None, customer=customer)
     if request.method == "POST" and form.is_valid():
-        support_request = SupportRequest.objects.create(
-            customer=customer, order=form.cleaned_data["order"]
-        )
-        SupportMessage.objects.create(
-            request=support_request,
-            sender_type="customer",
-            body=form.cleaned_data["body"],
-        )
+        with transaction.atomic():
+            support_request = SupportRequest.objects.create(
+                customer=customer, order=form.cleaned_data["order"]
+            )
+            SupportMessage.objects.create(
+                request=support_request,
+                sender_type="customer",
+                body=form.cleaned_data["body"],
+            )
         messages.success(request, "Support request submitted.")
         return redirect("support:request_detail", pk=support_request.pk)
     return render(request, "support/request_form.html", {"form": form})
@@ -164,12 +165,17 @@ def request_detail(request, pk):
         customer=customer,
     )
     form = CustomerMessageForm(request.POST) if request.method == "POST" else CustomerMessageForm()
-    if request.method == "POST" and form.is_valid() and support_request.status != "closed":
-        SupportMessage.objects.create(
-            request=support_request,
-            sender_type="customer",
-            body=form.cleaned_data["body"],
-        )
-        messages.success(request, "Message sent.")
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            locked = get_object_or_404(SupportRequest.objects.select_for_update(), pk=pk, customer=customer)
+            if locked.status == "closed":
+                messages.error(request, "This conversation is closed.")
+            else:
+                SupportMessage.objects.create(
+                    request=locked,
+                    sender_type="customer",
+                    body=form.cleaned_data["body"],
+                )
+                messages.success(request, "Message sent.")
         return redirect("support:request_detail", pk=pk)
     return render(request, "support/customer_detail.html", {"support_request": support_request, "form": form})
