@@ -15,6 +15,7 @@ from .forms import (
     CustomerAuthenticationForm,
     CustomerProfileForm,
     CustomerRegistrationForm,
+    CustomerSearchForm,
     EmployeeCreationForm,
     EmployeeUpdateForm,
 )
@@ -103,14 +104,19 @@ def logout_view(request):
 
 @staff_required
 def customer_list(request):
-    query = request.GET.get("q", "").strip()
+    form = CustomerSearchForm(request.GET or None)
     customers = Customer.objects.order_by("name", "pk")
-    if query:
-        filters = Q(name__icontains=query) | Q(email__icontains=query)
-        if query.isdecimal():
-            filters |= Q(pk=int(query))
-        customers = customers.filter(filters)
-    return render(request, "accounts/customer_list.html", {"customers": customers, "query": query})
+    if form.is_bound:
+        if form.is_valid():
+            query = form.cleaned_data["q"]
+            if query:
+                filters = Q(name__icontains=query) | Q(email__icontains=query)
+                if query.isdecimal() and len(query) <= 19 and int(query) <= 9223372036854775807:
+                    filters |= Q(pk=int(query))
+                customers = customers.filter(filters)
+        else:
+            customers = customers.none()
+    return render(request, "accounts/customer_list.html", {"customers": customers, "form": form})
 
 
 @staff_required

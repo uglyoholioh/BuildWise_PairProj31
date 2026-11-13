@@ -5,6 +5,13 @@ from django.contrib.auth.models import User
 from .models import Customer, Employee
 
 
+class CustomerSearchForm(forms.Form):
+    q = forms.CharField(
+        label="Customer name, email or ID", required=False, max_length=254,
+        widget=forms.TextInput(attrs={"class": "form-control", "type": "search", "id": "customer-search", "placeholder": "Name, email or customer ID"}),
+    )
+
+
 class CustomerRegistrationForm(UserCreationForm):
     name = forms.CharField(max_length=160)
     email = forms.EmailField()

@@ -5,8 +5,8 @@
 {% block content %}
 <div class="mb-4"><h1 class="h3 mb-1">Support conversations</h1><p class="text-body-secondary mb-0">Filter by status or order number.</p></div>
 <form method="get" class="row g-2 mb-4">
-  <div class="col-sm-4"><label class="visually-hidden" for="status-filter">Status</label><select id="status-filter" class="form-select" name="status"><option value="">All statuses</option><option value="open" {% if status == "open" %}selected{% endif %}>Open</option><option value="in_progress" {% if status == "in_progress" %}selected{% endif %}>In progress</option><option value="closed" {% if status == "closed" %}selected{% endif %}>Closed</option></select></div>
-  <div class="col-sm-4"><label class="visually-hidden" for="order-filter">Order number</label><input class="form-control" id="order-filter" name="order" type="search" value="{{ order_id }}" placeholder="Order number"></div>
+  <div class="col-sm-4"><label class="visually-hidden" for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>{{ form.status }}{{ form.status.errors }}</div>
+  <div class="col-sm-4"><label class="visually-hidden" for="{{ form.order.id_for_label }}">{{ form.order.label }}</label>{{ form.order }}{{ form.order.errors }}</div>
   <div class="col-auto"><button class="btn btn-primary" type="submit">Filter</button></div>
 </form>
 <div class="list-group">{% for item in requests %}<a class="list-group-item list-group-item-action" href="{% url 'support:staff_request_detail' item.pk %}"><strong>Conversation #{{ item.pk }} · Order #{{ item.order_id }}</strong><span class="text-body-secondary"> · {{ item.customer.name }} · {{ item.status }} · opened {{ item.created_at }}</span></a>{% empty %}<div class="alert alert-info" role="status">No conversations match these filters.</div>{% endfor %}</div>

@@ -4,6 +4,9 @@ from orders.models import Order
 from .models import Review
 
 
+SUPPORT_STATUSES = (("open", "Open"), ("in_progress", "In progress"), ("closed", "Closed"))
+
+
 class ReviewForm(forms.ModelForm):
     class Meta:
         model = Review
@@ -47,8 +50,19 @@ class CustomerMessageForm(forms.Form):
         self.fields["body"].widget.attrs["class"] = "form-control"
 
 
+class SupportFilterForm(forms.Form):
+    status = forms.ChoiceField(
+        required=False, choices=[("", "All statuses"), *SUPPORT_STATUSES],
+        widget=forms.Select(attrs={"class": "form-select", "id": "status-filter"}),
+    )
+    order = forms.IntegerField(
+        label="Order number", required=False, min_value=1, max_value=9223372036854775807,
+        widget=forms.NumberInput(attrs={"class": "form-control", "placeholder": "Order number", "id": "order-filter"}),
+    )
+
+
 class SupportStatusForm(forms.Form):
-    status = forms.ChoiceField(choices=(("open", "Open"), ("in_progress", "In progress"), ("closed", "Closed")))
+    status = forms.ChoiceField(choices=SUPPORT_STATUSES)
     resolution_note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
 
     def __init__(self, *args, instance, **kwargs):

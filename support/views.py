@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 from accounts.models import Customer, StaffAction
 from accounts.views import staff_required
 from orders.models import Order, PurchasedPC
-from .forms import CustomerMessageForm, ReviewForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
+from .forms import CustomerMessageForm, ReviewForm, SupportFilterForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
 from .models import Review, SupportMessage, SupportRequest
 
 
@@ -68,13 +68,18 @@ def review_create(request, pk):
 @staff_required
 def staff_request_list(request):
     requests = SupportRequest.objects.select_related("customer", "order").order_by("-created_at", "-pk")
-    status = request.GET.get("status", "").strip()
-    order_id = request.GET.get("order", "").strip()
-    if status in {"open", "in_progress", "closed"}:
-        requests = requests.filter(status=status)
-    if order_id.isdecimal():
-        requests = requests.filter(order_id=int(order_id))
-    return render(request, "support/staff_list.html", {"requests": requests, "status": status, "order_id": order_id})
+    form = SupportFilterForm(request.GET or None)
+    if form.is_bound:
+        if form.is_valid():
+            status = form.cleaned_data["status"]
+            order_id = form.cleaned_data["order"]
+            if status:
+                requests = requests.filter(status=status)
+            if order_id is not None:
+                requests = requests.filter(order_id=order_id)
+        else:
+            requests = requests.none()
+    return render(request, "support/staff_list.html", {"requests": requests, "form": form})
 
 
 @staff_required

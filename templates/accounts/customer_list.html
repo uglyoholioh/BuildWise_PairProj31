@@ -5,7 +5,7 @@
 {% block content %}
 <div class="mb-4"><h1 class="h3 mb-1">Customer records</h1><p class="text-body-secondary mb-0">Search customer name, email or ID. Records are read-only.</p></div>
 <form method="get" class="row g-2 mb-4">
-  <div class="col-sm-8"><label class="visually-hidden" for="customer-search">Customer name, email or ID</label><input id="customer-search" class="form-control" type="search" name="q" value="{{ query }}" placeholder="Name, email or customer ID"></div>
+  <div class="col-sm-8"><label class="visually-hidden" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>{{ form.q }}{{ form.q.errors }}</div>
   <div class="col-auto"><button class="btn btn-primary" type="submit">Search</button></div>
 </form>
 <div class="list-group">
