@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer
+from catalogue.drafts import build_revision
 from catalogue.compatibility import check_configuration_components, check_preset_items
 from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from .forms import QuestionnaireForm, ShortlistForm
@@ -33,6 +34,10 @@ def shortlist_save(request):
         return redirect("catalogue:configure")
     form = ShortlistForm(request.POST if request.method == "POST" else None,
                          initial={"name": build.get("name", "My PC")})
+    revision = build_revision(build)
+    if request.method == "POST" and request.POST.get("build_revision") != revision:
+        messages.error(request, "Your current build changed. Review the selections before saving.")
+        return redirect("catalogue:configure")
     if request.method == "POST" and form.is_valid():
         saved = form.save(commit=False)
         saved.customer = customer
@@ -42,7 +47,7 @@ def shortlist_save(request):
         saved.save()
         messages.success(request, "Build saved to your shortlist.")
         return redirect("recommendations:shortlist")
-    return render(request, "recommendations/shortlist_form.html", {"form": form})
+    return render(request, "recommendations/shortlist_form.html", {"form": form, "build_revision": revision})
 
 
 def _shortlist_build(saved):
@@ -96,41 +101,21 @@ def _comparison_selections(request):
 @require_http_methods(["GET", "POST"])
 def questionnaire(request):
     customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-    previous = previous_response(request, customer)
-    initial = None
-    if previous and request.method == "GET":
-        initial = {
-            "games": list(previous.game_settings.values_list("game_id", flat=True)),
-            "max_spend": previous.max_spend,
+    submitted = request.POST if request.method == "POST" else None
+    previous = previous_response(request, customer) if submitted is None else None
+    form = QuestionnaireForm(submitted, initial_response=previous)
+    reviewing = submitted is not None and submitted.get("action") == "settings"
+    if submitted is not None:
+        missing = {
+            name: field.initial for name, field in form.fields.items()
+            if name.startswith("game_") and name not in submitted
         }
-    form = QuestionnaireForm(
-        request.POST if request.method == "POST" else None,
-        initial=initial,
-        initial_response=previous,
-    )
-    if request.method == "POST":
-        selection = QuestionnaireForm(request.POST, include_settings=False)
-        if not selection.is_valid():
-            form = selection
-        else:
-            draft = request.session.get("questionnaire_draft", {})
-            # Keep edits to removed games so re-adding a game restores its settings.
-            for game_id in GameSettingSupport.objects.values_list("game_id", flat=True).distinct():
-                for suffix in ("fps_goal", "resolution", "graphics_preset"):
-                    key = f"game_{game_id}_{suffix}"
-                    if key in request.POST:
-                        draft[key] = request.POST[key]
-            request.session["questionnaire_draft"] = draft
-            needs_settings = any(name not in request.POST for name in form.fields if name.startswith("game_"))
-            if request.POST.get("action") == "settings" or needs_settings:
-                initial = dict(draft)
-                initial.update({"games": list(selection.cleaned_data["games"].values_list("pk", flat=True)),
-                                "max_spend": selection.cleaned_data["max_spend"]})
-                form = QuestionnaireForm(initial=initial, initial_response=previous)
-                return render(request, "recommendations/questionnaire.html", {
-                    "form": form, "game_settings": form.game_settings,
-                })
-    if request.method == "POST" and form.is_valid():
+        if missing:
+            reviewing = True
+            data = submitted.copy()
+            data.update(missing)
+            form = QuestionnaireForm(data)
+    if submitted is not None and not reviewing and form.is_valid():
         with transaction.atomic():
             response = QuestionnaireResponse.objects.create(
                 customer=customer,

@@ -33,25 +33,23 @@ class QuestionnaireForm(forms.Form):
     )
     max_spend = forms.DecimalField(min_value=Decimal("0.01"), max_digits=10, decimal_places=2)
 
-    def __init__(self, *args, initial_response=None, include_settings=True, **kwargs):
+    def __init__(self, *args, initial_response=None, **kwargs):
         super().__init__(*args, **kwargs)
         if self.is_bound:
             selected = self.data.getlist("games") if hasattr(self.data, "getlist") else self.data.get("games", [])
             selected = selected if isinstance(selected, (list, tuple)) else [selected]
         else:
-            previous_games = []
-            if initial_response:
-                previous_games = list(initial_response.game_settings.values_list("game_id", flat=True))
-            selected = self.initial.get("games", previous_games)
+            selected = self.initial.get("games", [])
         if initial_response:
-            self.fields["max_spend"].initial = initial_response.max_spend
+            selected = list(initial_response.game_settings.values_list("game_id", flat=True))
+            self.initial.update(games=selected, max_spend=initial_response.max_spend)
         self.game_settings = []
         # Let ModelMultipleChoiceField validate IDs before querying dynamic settings.
         try:
             games = self.fields["games"].clean(selected)
         except forms.ValidationError:
             games = []
-        if not include_settings or len(games) > 3:
+        if len(games) > 3:
             games = []
         for game in games:
             supported = list(game.supported_settings.order_by("resolution", "graphics_preset"))
