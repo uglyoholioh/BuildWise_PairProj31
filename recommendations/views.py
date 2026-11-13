@@ -323,6 +323,8 @@ def compare_remove(request):
 
 def compare_builds(request):
     selected = _comparison_selections(request)
+    questionnaire = _previous_response(request, _customer(request))
+    settings = list(questionnaire.game_settings.select_related("game").order_by("game__name")) if questionnaire else []
     builds = []
     fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
     for selection in selected:
@@ -380,16 +382,14 @@ def compare_builds(request):
             if specs:
                 part += f" ({'; '.join(specs)})"
             by_category[label] = f"{by_category[label]}; {part}" if label in by_category else part
-        questionnaire = _previous_response(request, _customer(request))
-        estimates = []
-        if questionnaire:
-            for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+        estimates = {}
+        if not issues:
+            for setting in settings:
                 supported = GameSettingSupport.objects.filter(
                     game=setting.game, resolution=setting.resolution,
                     graphics_preset=setting.graphics_preset,
                 ).exists()
-                fps = predict_fps(items, setting) if supported and not issues else None
-                estimates.append({"setting": setting, "fps": fps})
+                estimates[setting.pk] = predict_fps(items, setting) if supported else None
         builds.append({
             "kind": kind,
             "id": item_id,
@@ -408,17 +408,16 @@ def compare_builds(request):
         {"label": "PC price", "values": [f"${build['price']}" if build["price"] is not None else "Unavailable" for build in builds]},
         {"label": "Available now", "values": [str(build["available"]) for build in builds]},
     ]
-    questionnaire = _previous_response(request, _customer(request))
     game_rows = []
-    if questionnaire:
-        for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
-            game_rows.append({
-                "label": f"{setting.game.name} · {setting.resolution} · {setting.graphics_preset} · target {setting.fps_goal} FPS (estimate)",
-                "values": [
-                    next((str(row["fps"]) + " FPS" if row["fps"] is not None else "Unavailable" for row in build["estimates"] if row["setting"].pk == setting.pk), "Unavailable")
-                    for build in builds
-                ],
-            })
+    for setting in settings:
+        estimates = [build["estimates"].get(setting.pk) for build in builds]
+        game_rows.append({
+            "setting": setting,
+            "values": [
+                {"fps": fps, "shortfall": max(0, setting.fps_goal - fps)} if fps is not None else None
+                for fps in estimates
+            ],
+        })
     return render(
         request,
         "recommendations/compare.html",

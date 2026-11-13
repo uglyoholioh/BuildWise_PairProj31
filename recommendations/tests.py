@@ -275,7 +275,8 @@ class RecommendationProfileTests(TestCase):
         session["comparison_items"] = [{"kind": "preset", "id": build.pk}]
         session.save()
         page = self.client.get(reverse("recommendations:compare"))
-        self.assertEqual(page.context["game_rows"][0]["values"], ["103 FPS"])
+        self.assertEqual(page.context["game_rows"][0]["values"], [{"fps": 103, "shortfall": 0}])
+        self.assertContains(page, "Meets target")
 
 
 class BuildComparisonTests(TestCase):

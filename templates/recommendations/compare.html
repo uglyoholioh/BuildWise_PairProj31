@@ -3,11 +3,33 @@
 {% block content %}
 {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 {% if user.is_authenticated %}<p><a href="{% url 'recommendations:shortlist' %}">Choose from my shortlist</a></p>{% endif %}
-<div class="d-flex justify-content-between flex-wrap gap-3 mb-3"><div><h1 class="h3 mb-1">Compare builds</h1><p class="text-body-secondary mb-0">Compare up to three builds side by side.</p></div><a class="btn btn-outline-primary align-self-start" href="{% url 'catalogue:preset_list' %}">Browse presets</a></div>
+<div class="d-flex justify-content-between flex-wrap gap-3 mb-3"><div><h1 class="h3 mb-1">Compare builds</h1><p class="text-body-secondary mb-0">{{ builds|length }} of 3 builds selected</p></div><a class="btn btn-outline-primary align-self-start" href="{% url 'catalogue:preset_list' %}">Browse presets</a></div>
 {% if builds %}<div class="table-responsive"><table class="table table-bordered align-middle"><thead><tr><th scope="col">Comparison</th>{% for build in builds %}<th scope="col"><div>{{ build.name }}</div><form method="post" action="{% url 'recommendations:compare_remove' %}">{% csrf_token %}<input type="hidden" name="kind" value="{{ build.kind }}"><input type="hidden" name="item_id" value="{{ build.id }}"><button class="btn btn-link btn-sm p-0" type="submit">Remove</button></form></th>{% endfor %}</tr></thead><tbody>
 {% for row in overview_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}
-{% for row in category_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}
+{% for row in game_rows %}
+  <tr>
+    <th scope="row">{{ row.setting.game.name }}<div class="small fw-normal">{{ row.setting.resolution }} · {{ row.setting.graphics_preset }} · {{ row.setting.fps_goal }} FPS target</div></th>
+    {% for estimate in row.values %}
+      <td>
+        {% if estimate is None %}<span class="text-body-secondary">Estimate unavailable</span>
+        {% else %}
+          <strong>{{ estimate.fps }} FPS</strong>
+          {% if estimate.shortfall %}
+            <div class="small text-warning-emphasis">Short by {{ estimate.shortfall }} FPS</div>
+          {% else %}
+            <div class="small text-success">Meets target</div>
+          {% endif %}
+        {% endif %}
+      </td>
+    {% endfor %}
+  </tr>
+{% endfor %}
+{% if game_rows %}
+  <tr><td colspan="{{ builds|length|add:1 }}" class="small text-body-secondary">FPS estimates come from a model trained on synthetic data, not measured benchmarks.</td></tr>
+{% else %}
+  <tr><th scope="row">Predicted performance</th><td colspan="{{ builds|length }}">No gaming needs recorded. <a href="{% url 'recommendations:questionnaire' %}">Complete the questionnaire</a> to compare supported FPS estimates.</td></tr>
+{% endif %}
 {% for build in builds %}{% if build.issues %}<tr><th scope="row">Validation · {{ build.name }}</th><td colspan="{{ builds|length }}"><span class="text-danger">{{ build.issues|join:" " }}</span></td></tr>{% endif %}{% endfor %}
-{% if questionnaire %}{% for row in game_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{% if value == "Unavailable" %}<span class="text-body-secondary">Unavailable</span>{% else %}{{ value }}{% endif %}</td>{% endfor %}</tr>{% endfor %}<tr><td colspan="{{ builds|length|add:1 }}" class="small text-body-secondary">FPS estimates come from a model trained on synthetic data, not measured benchmarks.</td></tr>{% else %}<tr><th scope="row">Predicted performance</th><td colspan="{{ builds|length }}">No gaming needs recorded. <a href="{% url 'recommendations:questionnaire' %}">Complete the questionnaire</a> to compare supported FPS estimates.</td></tr>{% endif %}
+{% for row in category_rows %}<tr><th scope="row">{{ row.label }}</th>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}
 </tbody></table></div>{% else %}<div class="alert alert-info">No builds selected. Add presets from their detail pages or recommendation results.</div>{% endif %}
 {% endblock %}
