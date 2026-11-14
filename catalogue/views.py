@@ -289,23 +289,24 @@ def accessory_update(request, pk):
 @require_http_methods(["GET", "POST"])
 def compatibility_rules(request):
     form = ComponentConflictForm(request.POST if request.method == "POST" else None)
-    if request.method == "POST" and form.is_valid():
+    if request.method == "POST":
         with transaction.atomic():
-            conflict = form.save()
-            moved_to_draft = revalidate_configurations([conflict.component_a, conflict.component_b])
-            StaffAction.objects.create(
-                employee=request.user.employee_profile,
-                action_type="component_conflict_added",
-                object_ref=str(conflict.pk),
-                detail=(
-                    f"Marked {conflict.component_a} and {conflict.component_b} incompatible: "
-                    f"{conflict.reason}"
-                ),
-            )
-        messages.success(request, "Compatibility rule added.")
-        if moved_to_draft:
-            messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
-        return redirect("catalogue:compatibility_rules")
+            if form.is_valid():
+                conflict = form.save()
+                moved_to_draft = revalidate_configurations([conflict.component_a, conflict.component_b])
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="component_conflict_added",
+                    object_ref=str(conflict.pk),
+                    detail=(
+                        f"Marked {conflict.component_a} and {conflict.component_b} incompatible: "
+                        f"{conflict.reason}"
+                    ),
+                )
+                messages.success(request, "Compatibility rule added.")
+                if moved_to_draft:
+                    messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
+                return redirect("catalogue:compatibility_rules")
     return render(
         request,
         "catalogue/compatibility_rules.html",
