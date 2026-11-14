@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.signing import Signer
 from django.db import OperationalError, transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -26,6 +26,7 @@ from .allocations import (
     component_snapshot,
     expected_pc_quantities,
     purchased_pc_allocation_issues,
+    reserve_restocked_part,
     reserved_pc_quantities,
     substitution_issues,
 )
@@ -676,7 +677,9 @@ def order_cancel(request, pk):
             for reservation in reservations:
                 reservation.status = Reservation.Status.RELEASED
                 reservation.save(update_fields=("status",))
-            for pc in PurchasedPC.objects.filter(order_line__order=order):
+            pcs = PurchasedPC.objects.filter(order_line__order=order)
+            refunded_before = pcs.aggregate(total=Sum("refund_amount"))["total"] or 0
+            for pc in pcs.exclude(status="cancelled").select_related("order_line"):
                 pc.status = "cancelled"
                 pc.refund_amount = pc.order_line.unit_price_snapshot
                 pc.save(update_fields=("status", "refund_amount"))
@@ -686,11 +689,14 @@ def order_cancel(request, pk):
             order.status = "cancelled"
             order.payment_status = "refunded"
             order.save(update_fields=("status", "payment_status"))
+            refund_note = f"Simulated refund of ${order.total_snapshot - refunded_before:.2f} recorded."
+            if refunded_before:
+                refund_note += f" Cumulative simulated refunds: ${order.total_snapshot:.2f}."
             OrderStatusHistory.objects.create(
                 order=order,
                 from_status="placed",
                 to_status="cancelled",
-                note=f"Customer cancelled before assembly or packing started; simulated refund of ${order.total_snapshot} recorded and reservations released.",
+                note=f"Customer cancelled before assembly or packing started. Reservations released. {refund_note}",
             )
             messages.success(request, "Your order has been cancelled.")
     return redirect("orders:order_list")
@@ -710,7 +716,23 @@ def start_order(request, pk):
             messages.error(request, "This PC is no longer waiting to start.")
         else:
             issues = purchased_pc_allocation_issues(pc)
-            if issues:
+            part = None
+            if issues and pc.status == "on_hold" and pc.assembly_started:
+                last_check = pc.quality_checks.order_by("-pk").first()
+                if last_check and not last_check.passed:
+                    part = reserve_restocked_part(pc)
+            if part:
+                pc.status = "corrective_work"
+                pc.hold_reason = "A working replacement is reserved. Repeat all quality checks."
+                pc.save(update_fields=("status", "hold_reason"))
+                StaffAction.objects.create(
+                    employee=request.user.employee_profile,
+                    action_type="pc_restocked_part_reserved",
+                    object_ref=str(pc.pk),
+                    detail=f"Reserved a restocked {part} for PC #{pc.pk}.",
+                )
+                messages.success(request, pc.hold_reason)
+            elif issues:
                 pc.status = "on_hold"
                 pc.hold_reason = " ".join(issues)
                 pc.save(update_fields=("status", "hold_reason"))
@@ -826,7 +848,7 @@ def record_quality_check(request, pk):
                             pc.status = "corrective_work"
                             pc.hold_reason = "A working replacement is reserved. Repeat all quality checks."
                         else:
-                            pc.hold_reason = f"{note} No working unit is available; use a US-A11 substitution."
+                            pc.hold_reason = f"{note} No working unit is available. Resume work after restocking or propose a different model."
                 pc.save(update_fields=("status", "hold_reason"))
                 StaffAction.objects.create(
                     employee=request.user.employee_profile,

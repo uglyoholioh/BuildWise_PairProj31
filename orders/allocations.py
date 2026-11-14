@@ -1,7 +1,7 @@
 from django.db.models import Sum
 
 from catalogue.compatibility import check_configuration_components
-from catalogue.models import Component
+from catalogue.models import Component, ConfigurationItem
 from inventory.availability import available_component_quantity
 from inventory.models import Reservation
 
@@ -44,9 +44,43 @@ def approved_pc_parts(purchased_pc, proposals=None):
     return [part for part in parts if part["quantity"] > 0]
 
 
+def replace_pc_part(parts, original_id, replacement):
+    after = [dict(part) for part in parts]
+    for part in after:
+        if part["component_id"] == original_id:
+            original = {**part, "quantity": 1}
+            part["quantity"] -= 1
+            after.append({**replacement, "quantity": 1})
+            return original, [part for part in after if part["quantity"] > 0]
+    return {}, after
+
+
+def snapshot_items(parts):
+    """Build unsaved ORM objects for the existing predictor, without catalogue reads."""
+    items = []
+    for part in parts:
+        component = Component(
+            pk=part["component_id"],
+            category=part.get("category", ""),
+            brand=part.get("brand", ""),
+            model=part.get("model", ""),
+            socket=part.get("socket", ""),
+            memory_type=part.get("memory_type", ""),
+            form_factor=part.get("form_factor", ""),
+            ml_tier=part.get("ml_tier", ""),
+            specs=part.get("specs", {}),
+        )
+        items.append(ConfigurationItem(component=component, quantity=part["quantity"]))
+    return items
+
+
 def expected_pc_quantities(purchased_pc):
+    return _part_quantities(approved_pc_parts(purchased_pc))
+
+
+def _part_quantities(parts):
     expected = {}
-    for part in approved_pc_parts(purchased_pc):
+    for part in parts:
         component_id = part["component_id"]
         expected[component_id] = expected.get(component_id, 0) + part["quantity"]
     return expected
@@ -67,14 +101,16 @@ def reserved_pc_quantities(purchased_pc):
 
 def substitution_issues(purchased_pc, original, replacement):
     """Validate a one-unit change against the complete approved specification."""
-    expected = expected_pc_quantities(purchased_pc)
-    if expected.get(original.pk, 0) < 1:
+    parts = approved_pc_parts(purchased_pc)
+    original_snapshot, proposed_parts = replace_pc_part(parts, original.pk, component_snapshot(replacement))
+    if not original_snapshot:
         return ["The original component is no longer part of this PC."]
     problems = []
-    if original.pk == replacement.pk or original.category != replacement.category:
+    if original.pk == replacement.pk or original_snapshot.get("category", original.category) != replacement.category:
         problems.append("Choose a different component in the same category.")
     if not replacement.active:
         problems.append("The proposed component is no longer available for sale.")
+    expected = _part_quantities(parts)
     actual = reserved_pc_quantities(purchased_pc)
     # The replaced unit may be missing after QC removed a faulty unit.
     for component_id, quantity in expected.items():
@@ -83,14 +119,8 @@ def substitution_issues(purchased_pc, original, replacement):
             problems.append("Other required parts are not fully reserved.")
     if any(quantity > expected.get(component_id, 0) for component_id, quantity in actual.items()):
         problems.append("The current allocations do not match this PC's approved specification.")
-    proposed = expected.copy()
-    proposed[original.pk] -= 1
-    proposed[replacement.pk] = proposed.get(replacement.pk, 0) + 1
-    ids = [component_id for component_id, quantity in proposed.items() if quantity > 0]
-    components = Component.objects.in_bulk(ids)
-    if len(components) != len(ids):
-        problems.append("A required component no longer exists.")
-    problems.extend(check_configuration_components(components.values(), require_active=False))
+    components = [item.component for item in snapshot_items(proposed_parts)]
+    problems.extend(check_configuration_components(components, require_active=False))
     if available_component_quantity(replacement) < 1:
         problems.append("The proposed component is no longer available.")
     return problems
@@ -112,6 +142,22 @@ def purchased_pc_allocation_issues(purchased_pc):
     if any(component_id not in expected for component_id in actual):
         problems.append("Unexpected components are reserved for this PC.")
     return problems
+
+
+def reserve_restocked_part(purchased_pc):
+    expected = expected_pc_quantities(purchased_pc)
+    actual = reserved_pc_quantities(purchased_pc)
+    if any(quantity > expected.get(component_id, 0) for component_id, quantity in actual.items()):
+        return None
+    missing = {component_id: quantity - actual.get(component_id, 0) for component_id, quantity in expected.items()}
+    shortfalls = [component_id for component_id, quantity in missing.items() if quantity]
+    if len(shortfalls) != 1 or missing[shortfalls[0]] != 1:
+        return None
+    part = Component.objects.filter(pk=shortfalls[0]).first()
+    if part is None or available_component_quantity(part) < 1:
+        return None
+    Reservation.objects.create(purchased_pc=purchased_pc, component=part, quantity=1)
+    return part
 
 
 def accessory_allocation_issues(order):

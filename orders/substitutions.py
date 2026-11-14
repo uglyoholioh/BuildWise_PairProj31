@@ -4,7 +4,7 @@ from recommendations.models import GameSettingSupport
 from recommendations.predictor import predict_fps
 from recommendations.ml.schema import MODEL_VERSION, MODEL_METHOD, MODEL_LIMITATIONS
 
-from .allocations import approved_pc_parts, component_snapshot
+from .allocations import approved_pc_parts, component_snapshot, replace_pc_part, snapshot_items
 
 
 SPECIFICATION_FIELDS = (
@@ -45,38 +45,10 @@ def replacement_details_changed(proposal, replacement):
     return any(proposal.replacement_snapshot.get(field) != current[field] for field in fields)
 
 
-def snapshot_items(parts):
-    """Build unsaved ORM objects for the existing predictor, without catalogue reads."""
-    items = []
-    for part in parts:
-        component = Component(
-            pk=part["component_id"],
-            category=part.get("category", ""),
-            brand=part.get("brand", ""),
-            model=part.get("model", ""),
-            socket=part.get("socket", ""),
-            memory_type=part.get("memory_type", ""),
-            form_factor=part.get("form_factor", ""),
-            ml_tier=part.get("ml_tier", ""),
-            specs=part.get("specs", {}),
-        )
-        items.append(ConfigurationItem(component=component, quantity=part["quantity"]))
-    return items
-
-
 def substitution_review_snapshot(pc, original, replacement):
     before = approved_pc_parts(pc)
-    after = [dict(part) for part in before]
-    original_snapshot = {}
-    for part in after:
-        if part["component_id"] == original.pk:
-            original_snapshot = dict(part)
-            original_snapshot["quantity"] = 1
-            part["quantity"] -= 1
-            break
     replacement_snapshot = component_snapshot(replacement)
-    after = [part for part in after if part["quantity"] > 0]
-    after.append(replacement_snapshot)
+    original_snapshot, after = replace_pc_part(before, original.pk, replacement_snapshot)
 
     performance = {"games": [], "method": MODEL_METHOD, "model_version": MODEL_VERSION, "limitations": MODEL_LIMITATIONS}
     customer = pc.order_line.order.customer
