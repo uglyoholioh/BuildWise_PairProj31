@@ -9,6 +9,7 @@
   <link href="{% static 'buildwise.css' %}" rel="stylesheet">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   {% with current=request.resolver_match.url_name section=request.resolver_match.namespace %}
   <nav class="navbar navbar-expand-xl bg-dark border-bottom border-primary border-3 shadow-sm py-3" data-bs-theme="dark" aria-label="{% if current == 'staff_login' %}Staff sign-in navigation{% else %}Main navigation{% endif %}">
     {% if current == 'staff_login' %}
@@ -111,10 +112,11 @@
     {% endif %}
   </nav>
   {% endwith %}
-  <main class="container mt-4">
+  <main id="main-content" class="container mt-4" tabindex="-1">
     {% include "messages.html" %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer"><div class="container d-flex flex-wrap justify-content-between gap-2"><span class="fw-semibold">BuildWise</span><span>Choose your parts. Build with confidence.</span></div></footer>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
 </body>
 </html>
