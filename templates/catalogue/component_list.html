@@ -3,12 +3,12 @@
 {% block title %}Component catalogue | BuildWise{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-4">
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-start gap-3 mb-4">
   <div>
     <h1 class="h3 mb-1">Component catalogue</h1>
     <p class="text-body-secondary mb-0">Maintain component specifications, prices and availability.</p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-primary" href="{% url 'catalogue:compatibility_rules' %}">Compatibility rules</a>
     <a class="btn btn-primary" href="{% url 'catalogue:component_create' %}">Add component</a>
   </div>
@@ -16,7 +16,7 @@
 
 
 <div class="card">
-  <div class="table-responsive">
+  <div class="table-responsive position-relative">
     <table class="table table-striped align-middle mb-0">
       <thead>
         <tr><th scope="col">Category</th><th scope="col">Component</th><th scope="col">Specifications</th><th scope="col">Price</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
@@ -25,11 +25,12 @@
         {% for component in components %}
           <tr>
             <td>{{ component.get_category_display }}</td>
-            <td>{% if component.image %}<img src="{{ component.image }}" alt="{{ component.brand }} {{ component.model }}" loading="lazy" class="img-thumbnail mb-2" style="max-width: 120px; max-height: 80px; object-fit: contain">{% endif %}<br><strong>{{ component.brand }} {{ component.model }}</strong>{% if component.description %}<div class="small text-body-secondary">{{ component.description }}</div>{% endif %}</td>
+            <td>{% if component.image_url %}<img src="{{ component.image_url }}" alt="{{ component.brand }} {{ component.model }}" loading="lazy" class="img-thumbnail mb-2" style="max-width: 120px; max-height: 80px; object-fit: contain" onerror="this.hidden = true; this.nextElementSibling.hidden = false;"><span hidden class="small text-body-secondary">Image unavailable</span>{% endif %}<br><strong>{{ component.brand }} {{ component.model }}</strong>{% if component.description %}<div class="small text-body-secondary">{{ component.description }}</div>{% endif %}</td>
             <td>
               {% if component.socket %}Socket: {{ component.socket }}<br>{% endif %}
               {% if component.memory_type %}Memory: {{ component.memory_type }}<br>{% endif %}
               {% if component.form_factor %}Form factor: {{ component.form_factor }}<br>{% endif %}
+              {% if component.requires_cpu_cooler %}Requires a separate CPU cooler<br>{% endif %}
               {% if component.ml_tier %}Tier: {{ component.ml_tier }}{% endif %}
               {% if component.specs %}<details><summary>More specs</summary><pre class="mb-0">{{ component.specs }}</pre></details>{% endif %}
             </td>

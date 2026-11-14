@@ -15,6 +15,7 @@ SPECIFICATION_FIELDS = (
     ("memory_type", "Memory type"),
     ("form_factor", "Form factor"),
     ("ml_tier", "Performance tier"),
+    ("requires_cpu_cooler", "Separate CPU cooler required"),
 )
 
 
@@ -28,6 +29,11 @@ def specification_rows(original, replacement):
             categories = dict(Component.Category.choices)
             before = categories.get(before, before)
             after = categories.get(after, after)
+        if field == "requires_cpu_cooler":
+            if not before and not after:
+                continue
+            before = "Yes" if before else "No"
+            after = "Yes" if after else "No"
         if before or after:
             rows.append({"label": label, "original": before, "replacement": after, "changed": before != after})
     original_specs = specification_fields(original.get("specs"))
@@ -42,7 +48,10 @@ def specification_rows(original, replacement):
 def replacement_details_changed(proposal, replacement):
     current = component_snapshot(replacement)
     fields = [field for field, label in SPECIFICATION_FIELDS] + ["specs"]
-    return any(proposal.replacement_snapshot.get(field) != current[field] for field in fields)
+    return any(
+        proposal.replacement_snapshot.get(field, False if field == "requires_cpu_cooler" else None) != current[field]
+        for field in fields
+    )
 
 
 def substitution_review_snapshot(pc, original, replacement):
