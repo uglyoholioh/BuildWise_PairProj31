@@ -1,5 +1,5 @@
-from django.conf import settings
 from django.db import models
+from django.templatetags.static import static
 
 
 def specification_fields(specs):
@@ -22,6 +22,7 @@ class Component(models.Model):
     model = models.CharField(max_length=120)
     description = models.TextField(blank=True)
     image = models.URLField(max_length=1000, blank=True)
+    image_file = models.ImageField(upload_to="catalogue/components/", blank=True)
     source_url = models.URLField(max_length=500, blank=True)
     specs = models.JSONField(default=dict, blank=True)
     socket = models.CharField(max_length=40, blank=True)
@@ -30,12 +31,17 @@ class Component(models.Model):
     ml_tier = models.CharField(max_length=40, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     active = models.BooleanField(default=True)
+    requires_cpu_cooler = models.BooleanField(default=False)
 
     class Meta:
         constraints = [models.CheckConstraint(condition=models.Q(price__gt=0), name="component_price_positive")]
 
     def __str__(self):
         return f"{self.brand} {self.model}"
+
+    @property
+    def image_url(self):
+        return self.image_file.url if self.image_file else self.image
 
 
 class ComponentConflict(models.Model):
@@ -72,6 +78,7 @@ class Configuration(models.Model):
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True)
     image = models.CharField(max_length=255, blank=True)
+    image_file = models.ImageField(upload_to="catalogue/presets/", blank=True)
     source_url = models.URLField(max_length=500, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -79,6 +86,14 @@ class Configuration(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def image_url(self):
+        if self.image_file:
+            return self.image_file.url
+        if not self.image or self.image.startswith(("https://", "http://", "/")):
+            return self.image
+        return static(self.image.removeprefix("static/"))
 
 
 class ConfigurationItem(models.Model):
@@ -100,6 +115,7 @@ class Accessory(models.Model):
     category = models.CharField(max_length=80)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     image = models.URLField(max_length=1000, blank=True)
+    image_file = models.ImageField(upload_to="catalogue/accessories/", blank=True)
     source_url = models.URLField(max_length=500, blank=True)
     active = models.BooleanField(default=True)
 
@@ -108,6 +124,10 @@ class Accessory(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def image_url(self):
+        return self.image_file.url if self.image_file else self.image
 
 
 class AssemblyFeeSetting(models.Model):

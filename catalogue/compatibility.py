@@ -84,6 +84,10 @@ def check_configuration_components(components, *, require_active=True):
     problems = check_compatibility(components, require_active=require_active)
     if missing:
         problems.insert(0, f"Configuration is missing required categories: {', '.join(missing)}.")
+    if Component.Category.COOLER not in categories:
+        for component in components:
+            if component.category == Component.Category.CPU and component.requires_cpu_cooler:
+                problems.append(f"{component_name(component)} requires a separate CPU cooler.")
     return problems
 
 

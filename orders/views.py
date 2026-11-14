@@ -526,6 +526,8 @@ def decide_substitution(request, pk):
                     replacement_component=replacement,
                     proposed_by=proposal.proposed_by,
                     reason=proposal.reason,
+                    spec_differences=proposal.spec_differences,
+                    fps_note=proposal.fps_note,
                     previous_pc_status=proposal.previous_pc_status,
                     original_snapshot=original_snapshot,
                     replacement_snapshot=replacement_snapshot,
@@ -618,6 +620,22 @@ def quality_check_revision(pc):
     return f"{check or 0}:{approval or 0}"
 
 
+def current_quality_results(pc):
+    """Only results after the latest failure and accepted replacement count."""
+    checks = list(pc.quality_checks.all())
+    last_failure = max((check.pk for check in checks if not check.passed), default=0)
+    last_approval = max(
+        (proposal.decided_at for proposal in pc.substitutions.all()
+         if proposal.status == "accepted" and proposal.decided_at),
+        default=None,
+    )
+    latest = {}
+    for check in sorted(checks, key=lambda row: (row.created_at, row.pk)):
+        if check.pk > last_failure and (last_approval is None or check.created_at > last_approval):
+            latest[check.checklist_item] = check
+    return latest
+
+
 @staff_required
 def order_queue(request):
     orders = list(
@@ -627,6 +645,8 @@ def order_queue(request):
         .prefetch_related(
             "lines__pcs__reservations__component",
             "lines__pcs__reservations__accessory",
+            "lines__pcs__quality_checks__employee__user",
+            "lines__pcs__substitutions",
             "lines__configuration__items__component",
             "lines__accessory",
             "lines__reservations__component",
@@ -646,6 +666,20 @@ def order_queue(request):
                     else purchased_pc_allocation_issues(purchased_pc)
                 )
                 purchased_pc.pending_substitution = purchased_pc.substitutions.filter(status="pending").first()
+                latest = current_quality_results(purchased_pc)
+                purchased_pc.quality_check_rows = [
+                    {"key": key, "label": label, "passed": key in latest and latest[key].passed}
+                    for key, label in QualityCheckForm.CHECKS
+                ]
+                purchased_pc.next_quality_check = next(
+                    (row["key"] for row in purchased_pc.quality_check_rows if not row["passed"]),
+                    "installed_parts",
+                )
+                purchased_pc.quality_check_history = sorted(
+                    purchased_pc.quality_checks.all(), key=lambda row: (row.created_at, row.pk), reverse=True,
+                )
+                for check in purchased_pc.quality_check_history:
+                    check.checklist_label = dict(QualityCheckForm.CHECKS).get(check.checklist_item, check.checklist_item)
                 if purchased_pc.status in ("quality_checking", "corrective_work") and not purchased_pc.pending_substitution:
                     purchased_pc.quality_check_revision = quality_check_revision(purchased_pc)
         order.pcs_ready = _pcs_ready(lines)
@@ -858,18 +892,9 @@ def record_quality_check(request, pk):
                 )
                 messages.error(request, f"PC #{pc.pk} needs corrective work: {pc.hold_reason}")
             else:
-                latest = {}
-                checks = pc.quality_checks.all()
-                last_failure = checks.filter(passed=False).order_by("-pk").first()
-                if last_failure:
-                    checks = checks.filter(pk__gt=last_failure.pk)
-                last_approval = pc.substitutions.filter(status="accepted").order_by("-decided_at", "-pk").first()
-                if last_approval:
-                    checks = checks.filter(created_at__gt=last_approval.decided_at)
-                for row in checks.order_by("created_at", "pk"):
-                    latest[row.checklist_item] = row.passed
+                latest = current_quality_results(pc)
                 required = {key for key, _ in QualityCheckForm.CHECKS}
-                if required <= latest.keys() and all(latest[key] for key in required):
+                if required <= latest.keys() and all(latest[key].passed for key in required):
                     for reservation in Reservation.objects.filter(
                         purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
                     ).select_related("component"):

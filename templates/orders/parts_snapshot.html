@@ -1,8 +1,10 @@
+{% load catalogue_display %}
 <ul class="small">
 {% for part in parts %}
   <li>{{ part.category }} · {{ part.brand }} {{ part.model }} × {{ part.quantity }}
     {% if part.socket %} · Socket {{ part.socket }}{% endif %}{% if part.memory_type %} · {{ part.memory_type }}{% endif %}{% if part.form_factor %} · {{ part.form_factor }}{% endif %}{% if part.ml_tier %} · Tier {{ part.ml_tier }}{% endif %}
-    {% for key, value in part.specs.items %} · {{ key }}: {{ value }}{% endfor %}
+    {% if part.requires_cpu_cooler %} · Separate CPU cooler required{% endif %}
+    {% for key, value in part.specs|specification_items %} · {{ key }}: {{ value }}{% endfor %}
   </li>
 {% empty %}<li>Purchase-time specifications were not recorded for this older order.</li>{% endfor %}
 </ul>

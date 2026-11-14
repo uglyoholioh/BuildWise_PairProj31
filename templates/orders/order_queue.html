@@ -52,12 +52,34 @@
                     {% if pc.status != "quality_passed" and pc.status != "cancelled" %}<a class="btn btn-outline-warning btn-sm" href="{% url 'orders:propose_substitution' pc.pk %}">Propose replacement</a>{% endif %}
                     {% endif %}
                   </div>
+                  {% if pc.assembly_started or pc.quality_check_history %}
+                    {% if pc.status != "cancelled" %}
+                    <h3 class="h6 mt-3">Current quality checklist</h3>
+                    <ul class="list-unstyled small mb-2">
+                      {% for check in pc.quality_check_rows %}
+                      <li class="d-flex justify-content-between align-items-start gap-2 py-1"><span>{{ check.label }}</span><span class="badge {% if check.passed %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if check.passed %}Passed{% else %}Outstanding{% endif %}</span></li>
+                      {% endfor %}
+                    </ul>
+                    <p class="small text-body-secondary">All three checks need fresh passes after a failed check or an accepted replacement.</p>
+                    {% endif %}
+                    {% if pc.quality_check_history %}
+                    <details class="mb-3">
+                      <summary>Quality check history</summary>
+                      <div class="table-responsive mt-2">
+                        <table class="table table-sm small mb-0">
+                          <thead><tr><th scope="col">Check</th><th scope="col">Result</th><th scope="col">Recorded by</th><th scope="col">Time</th><th scope="col">Notes</th></tr></thead>
+                          <tbody>{% for check in pc.quality_check_history %}<tr><td>{{ check.checklist_label }}</td><td>{% if check.passed %}Passed{% else %}Failed{% endif %}</td><td>{{ check.employee.user.get_username }}</td><td>{{ check.created_at }}</td><td>{{ check.note|default:"—" }}</td></tr>{% endfor %}</tbody>
+                        </table>
+                      </div>
+                    </details>
+                    {% endif %}
+                  {% endif %}
                   {% if not pc.pending_substitution %}
                   {% if pc.status == "quality_checking" or pc.status == "corrective_work" %}
                     <form class="row g-2 mt-2" method="post" action="{% url 'orders:record_quality_check' pc.pk %}">
                       {% csrf_token %}
                       <input type="hidden" name="revision" value="{{ pc.quality_check_revision }}">
-                      <div class="col-md-4"><label class="form-label small" for="check-{{ pc.pk }}">Check</label><select class="form-select form-select-sm" id="check-{{ pc.pk }}" name="checklist_item"><option value="installed_parts">Installed parts</option><option value="startup">Successful startup</option><option value="stability">Basic stability</option></select></div>
+                      <div class="col-md-4"><label class="form-label small" for="check-{{ pc.pk }}">Check</label><select class="form-select form-select-sm" id="check-{{ pc.pk }}" name="checklist_item">{% for check in pc.quality_check_rows %}<option value="{{ check.key }}"{% if check.key == pc.next_quality_check %} selected{% endif %}>{{ check.label }}</option>{% endfor %}</select></div>
                       <div class="col-md-2"><label class="form-label small" for="result-{{ pc.pk }}">Result</label><select class="form-select form-select-sm" id="result-{{ pc.pk }}" name="passed"><option value="yes">Pass</option><option value="no">Fail</option></select></div>
                       <div class="col-md-3"><label class="form-label small" for="fault-{{ pc.pk }}">Faulty component, if known</label><select class="form-select form-select-sm" id="fault-{{ pc.pk }}" name="faulty_component"><option value="">Not applicable</option>{% for reservation in pc.reservations.all %}{% if reservation.component and reservation.status == "reserved" %}<option value="{{ reservation.component_id }}">{{ reservation.component }}</option>{% endif %}{% endfor %}</select></div>
                       <div class="col-md-3"><label class="form-label small" for="note-{{ pc.pk }}">Failure reason / note</label><input class="form-control form-control-sm" id="note-{{ pc.pk }}" name="note"></div>

@@ -24,6 +24,7 @@ from catalogue.models import (
     Configuration,
     ConfigurationItem,
 )
+from inventory.availability import stock_position
 from inventory.models import Reservation, StockAdjustment
 from orders.allocations import component_snapshot
 from orders.models import (
@@ -374,6 +375,8 @@ class Command(BaseCommand):
         data = json.loads(DATA_PATH.read_text(encoding="utf-8"))
         password = options["password"]
 
+        self._check_accounts()
+        self._check_stock()
         staff = self._ensure_staff(password)
         customers = self._ensure_customers(password)
         components = self._upsert_components(data["components"])
@@ -395,6 +398,8 @@ class Command(BaseCommand):
             self._ensure_reviews(order_index)
             self._ensure_support(SUPPORT_THREADS, customers, order_index, staff)
 
+        # Any deficit rolls back the entire seed, including catalogue/account changes.
+        self._check_stock()
         published = Configuration.objects.filter(status=Configuration.Status.PUBLISHED).count()
         draft = Configuration.objects.filter(status=Configuration.Status.DRAFT).count()
         withdrawn = Configuration.objects.filter(status=Configuration.Status.WITHDRAWN).count()
@@ -418,6 +423,32 @@ class Command(BaseCommand):
         self.stdout.write("Existing orders and reviews are preserved when this command is rerun.")
 
     # ------------------------------------------------------------------ accounts
+    def _check_accounts(self):
+        expected = [(username, email, role) for username, _, _, email, role in STAFF]
+        expected.extend((username, email, None) for username, _, email, _ in CUSTOMERS)
+        for username, email, role in expected:
+            user = User.objects.filter(username=username).first()
+            user_id = user.pk if user else None
+            if (User.objects.filter(email__iexact=email).exclude(pk=user_id).exists()
+                    or Customer.objects.filter(email__iexact=email).exclude(user_id=user_id).exists()):
+                raise CommandError(
+                    f"Cannot seed {username}: its demo email belongs to another account. "
+                    "Use a separate demo database."
+                )
+            if user is None:
+                continue
+            if role is not None:
+                matching_profile = Employee.objects.filter(user=user, role=role).exists()
+                wrong_profile = Customer.objects.filter(user=user).exists()
+            else:
+                matching_profile = Customer.objects.filter(user=user, email__iexact=email).exists()
+                wrong_profile = Employee.objects.filter(user=user).exists()
+            if user.email.casefold() != email.casefold() or not matching_profile or wrong_profile:
+                raise CommandError(
+                    f"Cannot seed {username}: the existing account does not match its demo identity and role. "
+                    "Use a separate demo database."
+                )
+
     def _ensure_user(self, username, first_name, last_name, email, password):
         user = User.objects.filter(username=username).first()
         if user is None:
@@ -429,16 +460,6 @@ class Command(BaseCommand):
                 email=email,
             )
             return user, True
-        changed = []
-        if not user.has_usable_password():
-            user.set_password(password)
-            changed.append("password")
-        for field, value in (("first_name", first_name), ("last_name", last_name), ("email", email)):
-            if getattr(user, field) != value:
-                setattr(user, field, value)
-                changed.append(field)
-        if changed:
-            user.save(update_fields=changed)
         return user, False
 
     def _ensure_staff(self, password):
@@ -464,6 +485,17 @@ class Command(BaseCommand):
         return customers
 
     # ----------------------------------------------------------------- catalogue
+    def _check_stock(self):
+        for item_type, model in (("component", Component), ("accessory", Accessory)):
+            for item in model.objects.all():
+                position = stock_position(item_type, item)
+                if position["physical"] < position["reserved"]:
+                    raise CommandError(
+                        f"Cannot seed storefront: {item} has {position['physical']} physical units "
+                        f"for {position['reserved']} reserved units. "
+                        "No changes were saved; use a separate demo database or correct existing stock first."
+                    )
+
     def _upsert_components(self, rows):
         components = {}
         for row in rows:

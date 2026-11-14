@@ -13,6 +13,7 @@ def component_snapshot(component, quantity=1):
         "price": str(component.price), "socket": component.socket,
         "memory_type": component.memory_type, "form_factor": component.form_factor,
         "ml_tier": component.ml_tier, "specs": component.specs,
+        "requires_cpu_cooler": component.requires_cpu_cooler,
     }
 
 
@@ -69,6 +70,7 @@ def snapshot_items(parts):
             form_factor=part.get("form_factor", ""),
             ml_tier=part.get("ml_tier", ""),
             specs=part.get("specs", {}),
+            requires_cpu_cooler=part.get("requires_cpu_cooler", False),
         )
         items.append(ConfigurationItem(component=component, quantity=part["quantity"]))
     return items

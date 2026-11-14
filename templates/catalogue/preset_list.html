@@ -44,8 +44,9 @@
 </form>
 <div class="row g-3">{% for row in presets %}<div class="col-md-6 col-xl-4">
     <article class="card h-100">
-      {% if row.configuration.image %}
-        <img src="{{ row.configuration.image }}" alt="{{ row.configuration.name }}" loading="lazy" class="card-img-top preset-image">
+      {% if row.configuration.image_url %}
+        <img src="{{ row.configuration.image_url }}" alt="{{ row.configuration.name }}" loading="lazy" class="card-img-top preset-image" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+        <div hidden class="border-bottom bg-body-tertiary text-body-secondary text-center p-4">Image unavailable</div>
       {% endif %}
       <div class="card-body d-flex flex-column">
         <h2 class="h5"><a class="text-decoration-none"

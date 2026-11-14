@@ -69,6 +69,12 @@ class CustomerProfileForm(forms.ModelForm):
         for field in self.fields.values():
             field.widget.attrs["class"] = "form-control"
 
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip()
+        if Customer.objects.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("An account with this email already exists.")
+        return email
+
 
 class EmployeeCreationForm(UserCreationForm):
     role = forms.ChoiceField(choices=Employee.Role.choices)

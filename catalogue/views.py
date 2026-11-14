@@ -42,7 +42,7 @@ def start_new_build(request):
 def configure(request):
     session_build = request.session.get("current_build", {})
     action = request.POST.get("action")
-    if action in ("complete", "shortlist") and request.POST.get("build_revision") != build_revision(session_build):
+    if request.method == "POST" and request.POST.get("build_revision") != build_revision(session_build):
         messages.error(request, "Your current build changed. Review the selections before saving.")
         return redirect("catalogue:configure")
     preset_id = request.GET.get("preset") if request.method == "GET" else None
@@ -165,7 +165,7 @@ def component_list(request):
 @staff_required
 @require_http_methods(["GET", "POST"])
 def component_create(request):
-    form = ComponentForm(request.POST if request.method == "POST" else None)
+    form = ComponentForm(request.POST if request.method == "POST" else None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             component = form.save()
@@ -185,7 +185,7 @@ def component_create(request):
 def component_update(request, pk):
     component = get_object_or_404(Component, pk=pk)
     old_active = component.active
-    form = ComponentForm(request.POST if request.method == "POST" else None, instance=component)
+    form = ComponentForm(request.POST if request.method == "POST" else None, request.FILES or None, instance=component)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             component = form.save()
@@ -241,7 +241,7 @@ def accessory_list(request):
 @staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_create(request):
-    form = AccessoryForm(request.POST if request.method == "POST" else None)
+    form = AccessoryForm(request.POST if request.method == "POST" else None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             accessory = form.save()
@@ -261,7 +261,7 @@ def accessory_create(request):
 def accessory_update(request, pk):
     accessory = get_object_or_404(Accessory, pk=pk)
     old_active = accessory.active
-    form = AccessoryForm(request.POST if request.method == "POST" else None, instance=accessory)
+    form = AccessoryForm(request.POST if request.method == "POST" else None, request.FILES or None, instance=accessory)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             accessory = form.save()
@@ -474,7 +474,7 @@ def _edit_preset(request, pk=None):
     if request.method == "POST":
         with transaction.atomic():
             configuration = Configuration() if creating else get_object_or_404(Configuration, pk=pk)
-            form = ConfigurationForm(request.POST, instance=configuration)
+            form = ConfigurationForm(request.POST, request.FILES or None, instance=configuration)
             formset = ConfigurationItemFormSet(request.POST, instance=configuration, prefix="items")
             form_valid = form.is_valid()
             items_valid = formset.is_valid()
@@ -482,17 +482,21 @@ def _edit_preset(request, pk=None):
                 publishing = form.cleaned_data["status"] == Configuration.Status.PUBLISHED
                 if publishing and current_assembly_fee() is None:
                     form.add_error("status", "Set the shared assembly fee before publishing a preset.")
+                if publishing:
+                    items = [
+                        item_form.instance for item_form in formset.forms
+                        if item_form.cleaned_data and not item_form.cleaned_data.get("DELETE")
+                        and item_form.cleaned_data.get("component")
+                    ]
+                    # Validate before saving: database rollback cannot remove an uploaded file.
+                    for issue in check_preset_items(items):
+                        form.add_error(None, issue)
                 if not form.errors:
                     try:
                         with transaction.atomic():
                             configuration = form.save()
                             formset.instance = configuration
                             formset.save()
-                            if publishing:
-                                for issue in check_preset_items(configuration.items.select_related("component")):
-                                    form.add_error(None, issue)
-                                if form.errors:
-                                    transaction.set_rollback(True)
                     except IntegrityError:
                         form.add_error(None, "These component rows could not be saved. Reload the preset and try again.")
                 if not form.errors:

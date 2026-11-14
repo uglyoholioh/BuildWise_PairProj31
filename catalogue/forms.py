@@ -2,10 +2,21 @@ from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from .compatibility import REQUIRED_SPECS
 from .models import Accessory, Component, ComponentConflict, Configuration, ConfigurationItem
+
+
+def validate_image_upload(upload):
+    # Existing FieldFiles and the clear checkbox need no upload validation.
+    if upload and hasattr(upload, "image"):
+        if upload.size > 5 * 1024 * 1024:
+            raise ValidationError("Choose an image no larger than 5 MB.")
+        if upload.image.format not in ("JPEG", "PNG", "GIF", "WEBP"):
+            raise ValidationError("Choose a JPEG, PNG, GIF or WebP image.")
+    return upload
 
 
 class ComponentForm(forms.ModelForm):
@@ -14,11 +25,14 @@ class ComponentForm(forms.ModelForm):
     class Meta:
         model = Component
         fields = (
-            "category", "brand", "model", "description", "image", "source_url", "price", "active",
-            "socket", "memory_type", "form_factor", "ml_tier", "specs",
+            "category", "brand", "model", "description", "image_file", "image", "source_url", "price", "active",
+            "socket", "memory_type", "form_factor", "requires_cpu_cooler", "ml_tier", "specs",
         )
+        labels = {"image_file": "Upload image", "image": "External image URL", "requires_cpu_cooler": "CPU requires a separate cooler"}
         help_texts = {
-            "image": "Public product image URL.",
+            "image_file": "JPEG, PNG, GIF or WebP, up to 5 MB. An uploaded image takes priority over the URL.",
+            "image": "Optional public image URL. Used when no image is uploaded.",
+            "requires_cpu_cooler": "For CPUs supplied without an included cooler. Builds using this CPU must include a CPU cooler.",
             "source_url": "Product page used for the listed details and price.",
         }
         widgets = {"specs": forms.Textarea(attrs={"rows": 4})}
@@ -31,6 +45,9 @@ class ComponentForm(forms.ModelForm):
                 else "form-select" if isinstance(field.widget, forms.Select)
                 else "form-control"
             )
+
+    def clean_image_file(self):
+        return validate_image_upload(self.cleaned_data["image_file"])
 
     def clean_specs(self):
         specs = self.cleaned_data["specs"]
@@ -45,6 +62,8 @@ class ComponentForm(forms.ModelForm):
         for field in REQUIRED_SPECS.get(cleaned_data.get("category"), ()):
             if not cleaned_data.get(field):
                 self.add_error(field, "This specification is required for the selected category.")
+        if cleaned_data.get("requires_cpu_cooler") and cleaned_data.get("category") != Component.Category.CPU:
+            self.add_error("requires_cpu_cooler", "Only a CPU can require a separate CPU cooler.")
         return cleaned_data
 
 
@@ -53,9 +72,11 @@ class AccessoryForm(forms.ModelForm):
 
     class Meta:
         model = Accessory
-        fields = ("name", "category", "image", "source_url", "price", "active")
+        fields = ("name", "category", "image_file", "image", "source_url", "price", "active")
+        labels = {"image_file": "Upload image", "image": "External image URL"}
         help_texts = {
-            "image": "Public product image URL.",
+            "image_file": "JPEG, PNG, GIF or WebP, up to 5 MB. An uploaded image takes priority over the URL.",
+            "image": "Optional public image URL. Used when no image is uploaded.",
             "source_url": "Product page used for the listed details and price.",
         }
 
@@ -66,6 +87,9 @@ class AccessoryForm(forms.ModelForm):
                 "form-check-input" if isinstance(field.widget, forms.CheckboxInput)
                 else "form-control"
             )
+
+    def clean_image_file(self):
+        return validate_image_upload(self.cleaned_data["image_file"])
 
 
 class ComponentConflictForm(forms.ModelForm):
@@ -100,9 +124,11 @@ class ComponentConflictForm(forms.ModelForm):
 class ConfigurationForm(forms.ModelForm):
     class Meta:
         model = Configuration
-        fields = ("name", "description", "image", "source_url", "status")
+        fields = ("name", "description", "image_file", "image", "source_url", "status")
+        labels = {"image_file": "Upload image", "image": "Image URL or static path"}
         help_texts = {
-            "image": "Enter an image URL or project-relative path.",
+            "image_file": "JPEG, PNG, GIF or WebP, up to 5 MB. An uploaded image takes priority over the URL or path.",
+            "image": "Optional public image URL or a path inside the project's static folder, such as images/pc.png.",
             "source_url": "Optional page used as the source for this preset.",
         }
 
@@ -112,6 +138,17 @@ class ConfigurationForm(forms.ModelForm):
             field.widget.attrs["class"] = (
                 "form-select" if isinstance(field.widget, forms.Select) else "form-control"
             )
+
+    def clean_image_file(self):
+        return validate_image_upload(self.cleaned_data["image_file"])
+
+    def clean_image(self):
+        image = self.cleaned_data["image"].strip()
+        if image.startswith(("https://", "http://")):
+            URLValidator(schemes=("http", "https"))(image)
+        elif image and (":" in image or "\\" in image or image.startswith("//") or ".." in image.split("/")):
+            raise ValidationError("Enter an HTTP(S) image URL or a static image path.")
+        return image
 
 
 class ConfigurationItemForm(forms.ModelForm):
