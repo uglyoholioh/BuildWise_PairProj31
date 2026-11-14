@@ -42,7 +42,7 @@ def start_new_build(request):
 def configure(request):
     session_build = request.session.get("current_build", {})
     action = request.POST.get("action")
-    if action == "complete" and request.POST.get("build_revision") != build_revision(session_build):
+    if action in ("complete", "shortlist") and request.POST.get("build_revision") != build_revision(session_build):
         messages.error(request, "Your current build changed. Review the selections before saving.")
         return redirect("catalogue:configure")
     preset_id = request.GET.get("preset") if request.method == "GET" else None

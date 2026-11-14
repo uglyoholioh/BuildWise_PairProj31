@@ -11,7 +11,7 @@
     {% if row.issues %}<div class="alert alert-danger">{% for issue in row.issues %}<div>{{ issue }}</div>{% endfor %}</div>{% endif %}
     {% if row.accessory %}<p>{{ row.accessory.category }} · {{ row.accessory.name }}</p>{% else %}<ul>{% for item in row.items %}<li>{{ item.component.get_category_display }} — {{ item.component.brand }} {{ item.component.model }} × {{ item.quantity }} (${{ item.component.price }} each)</li>{% endfor %}</ul>{% endif %}
     {% if row.stock < row.line.quantity %}<p class="text-danger">Only {{ row.stock }} available.</p>{% endif %}
-    <form class="d-flex gap-2 align-items-end" method="post">{% csrf_token %}<input type="hidden" name="line_id" value="{{ row.line.id }}"><div><label class="form-label" for="qty-{{ row.line.id }}">Quantity</label><input class="form-control" id="qty-{{ row.line.id }}" type="number" min="1" max="20" name="quantity" value="{{ row.line.quantity }}"></div><button class="btn btn-outline-primary" name="action" value="update">Update</button><button class="btn btn-outline-danger" name="action" value="remove">Remove</button></form>
+    <form class="d-flex gap-2 align-items-end" method="post">{% csrf_token %}<input type="hidden" name="line_id" value="{{ row.line.id }}"><div><label class="form-label" for="qty-{{ row.line.id }}">Quantity</label><input class="form-control" id="qty-{{ row.line.id }}" type="number" min="1" max="{{ max_quantity }}" name="quantity" value="{{ row.line.quantity }}"></div><button class="btn btn-outline-primary" name="action" value="update">Update</button><button class="btn btn-outline-danger" name="action" value="remove">Remove</button></form>
   </div></article>
   {% endfor %}
   <p class="h5">Cart total: ${{ total }}</p>

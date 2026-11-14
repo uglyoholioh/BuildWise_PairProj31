@@ -34,6 +34,9 @@ from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCh
 from .substitutions import replacement_details_changed, substitution_review_snapshot
 
 
+MAX_CART_QUANTITY = 20
+
+
 def _build_snapshot(items):
     return {"components": [component_snapshot(item.component, item.quantity) for item in items]}
 
@@ -106,15 +109,17 @@ def cart(request):
                     quantity = int(request.POST.get("quantity", ""))
                 except ValueError:
                     quantity = 0
-                if 1 <= quantity <= 20:
+                if 1 <= quantity <= MAX_CART_QUANTITY:
                     line["quantity"] = quantity
                 else:
-                    messages.error(request, "Quantity must be between 1 and 20.")
+                    messages.error(request, f"Quantity must be between 1 and {MAX_CART_QUANTITY}.")
             break
         request.session["cart"] = lines
         return redirect("orders:cart")
     rows, total = _cart_preview(lines, include_stock=True)
-    return render(request, "orders/cart.html", {"lines": rows, "total": total, "has_cart": bool(lines)})
+    return render(request, "orders/cart.html", {
+        "lines": rows, "total": total, "has_cart": bool(lines), "max_quantity": MAX_CART_QUANTITY,
+    })
 
 
 @require_POST
@@ -147,18 +152,10 @@ def cart_add(request):
         if not available_accessory_quantity(accessory):
             messages.error(request, "This accessory is out of stock.")
             return redirect("catalogue:accessory_list")
-        lines = request.session.get("cart", [])
-        existing = next((line for line in lines if line.get("kind") == "accessory" and line.get("accessory_id") == accessory.pk), None)
-        if existing:
-            if existing.get("quantity", 1) >= 20:
-                messages.error(request, "You can add up to 20 units per cart line.")
-                return redirect("orders:cart")
-            existing["quantity"] = existing.get("quantity", 1) + 1
-        else:
-            lines.append({"id": uuid4().hex, "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk, "name": accessory.name, "quantity": 1, "quoted_price": str(accessory.price)})
-        request.session["cart"] = lines
-        messages.success(request, f"{accessory.name} added to your cart.")
-        return redirect("orders:cart")
+        return _add_cart_line(request, {
+            "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk,
+            "name": accessory.name, "quoted_price": str(accessory.price),
+        })
     else:
         messages.error(request, "Choose a valid build to add to the cart.")
         return redirect("orders:cart")
@@ -170,7 +167,6 @@ def cart_add(request):
     if issues or not items or not available or not fee:
         messages.error(request, "This build is incomplete, unavailable, incompatible, or missing a PC assembly fee.")
         return redirect("orders:cart")
-    quantity = 1
     snapshot = _build_snapshot(items)
     source_preset = configuration if kind == "preset" else Configuration.objects.filter(
         pk=build.get("preset_id"),
@@ -183,17 +179,30 @@ def cart_add(request):
     )
     if kind == "custom":
         key += f":source:{source_preset.pk if source_preset else 'none'}"
+    return _add_cart_line(request, {
+        "key": key, "kind": kind, "configuration_id": configuration_id, "name": name,
+        "custom_snapshot": snapshot, "quoted_price": str(calculate_pc_price(items, fee.fee_amount)),
+    })
+
+
+def _add_cart_line(request, new_line):
     lines = request.session.get("cart", [])
-    existing = next((line for line in lines if line.get("key") == key), None)
-    if existing:
-        if existing.get("quantity", 1) >= 20:
-            messages.error(request, "You can add up to 20 units per cart line.")
-            return redirect("orders:cart")
-        existing["quantity"] = existing.get("quantity", 1) + quantity
+    for line in lines:
+        if new_line["kind"] == "accessory":
+            matches = line.get("kind") == "accessory" and line.get("accessory_id") == new_line["accessory_id"]
+        else:
+            matches = line.get("key") == new_line["key"]
+        if matches:
+            quantity = line.get("quantity", 1)
+            if quantity >= MAX_CART_QUANTITY:
+                messages.error(request, f"You can add up to {MAX_CART_QUANTITY} units per cart line.")
+                return redirect("orders:cart")
+            line["quantity"] = quantity + 1
+            break
     else:
-        lines.append({"id": uuid4().hex, "key": key, "kind": kind, "configuration_id": configuration_id, "name": name, "custom_snapshot": snapshot, "quantity": quantity, "quoted_price": str(calculate_pc_price(items, fee.fee_amount))})
+        lines.append({**new_line, "id": uuid4().hex, "quantity": 1})
     request.session["cart"] = lines
-    messages.success(request, f"{name} added to your cart.")
+    messages.success(request, f"{new_line['name']} added to your cart.")
     return redirect("orders:cart")
 
 
@@ -393,7 +402,6 @@ def order_list(request):
 @staff_required
 @require_http_methods(["GET", "POST"])
 def propose_substitution(request, pk):
-    order_id = _order_id_for_pc(pk)
     pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
     order = pc.order_line.order
     form = SubstitutionProposalForm(
@@ -401,8 +409,8 @@ def propose_substitution(request, pk):
     )
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            order = get_object_or_404(Order, pk=order_id)
-            pc = get_object_or_404(PurchasedPC, pk=pk)
+            pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+            order = pc.order_line.order
             if (
                 order.payment_status != "paid"
                 or order.status in ("cancelled", "delivered", "dispatched", "packing")
@@ -484,14 +492,11 @@ def withdraw_substitution(request, pk):
 def decide_substitution(request, pk):
     with transaction.atomic():
         proposal = get_object_or_404(
-            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"), pk=pk
+            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"),
+            pk=pk, purchased_pc__order_line__order__customer__user=request.user,
         )
-        order_id = proposal.purchased_pc.order_line.order_id
-        order = get_object_or_404(
-            Order.objects, pk=order_id, customer__user=request.user
-        )
-        pc = get_object_or_404(PurchasedPC, pk=proposal.purchased_pc_id)
-        proposal = get_object_or_404(SubstitutionProposal, pk=pk)
+        pc = proposal.purchased_pc
+        order = pc.order_line.order
         decision = request.POST.get("decision")
         if (
             proposal.status != "pending"
@@ -594,7 +599,7 @@ def decide_substitution(request, pk):
             messages.success(request, "This PC was cancelled and its full PC price was recorded for refund.")
         else:
             messages.error(request, "Choose accept or decline.")
-    return redirect("orders:order_detail", pk=order_id)
+    return redirect("orders:order_detail", pk=order.pk)
 
 
 def _pcs_ready(lines):
@@ -654,13 +659,6 @@ def order_queue(request):
     return render(request, "orders/order_queue.html", {"orders": orders})
 
 
-def _order_id_for_pc(pk):
-    order_id = PurchasedPC.objects.filter(pk=pk).values_list("order_line__order_id", flat=True).first()
-    if order_id is None:
-        raise Http404
-    return order_id
-
-
 @login_required
 @require_POST
 def order_cancel(request, pk):
@@ -701,12 +699,9 @@ def order_cancel(request, pk):
 @staff_required
 @require_POST
 def start_order(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order, pk=order_id)
-        pc = get_object_or_404(
-            PurchasedPC.objects.select_related("order_line"), pk=pk
-        )
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if order.payment_status != "paid" or order.status in ("cancelled", "delivered"):
             messages.error(request, "This order cannot be started.")
         elif pc.substitutions.filter(status="pending").exists():
@@ -754,10 +749,9 @@ def start_order(request, pk):
 @staff_required
 @require_POST
 def start_quality_check(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order, pk=order_id)
-        pc = get_object_or_404(PurchasedPC, pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if order.status in ("cancelled", "delivered") or pc.status != "assembling" or pc.substitutions.filter(status="pending").exists():
             messages.error(request, "This PC is not ready for quality checks.")
         else:
@@ -776,10 +770,9 @@ def start_quality_check(request, pk):
 @staff_required
 @require_POST
 def record_quality_check(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order, pk=order_id)
-        pc = get_object_or_404(PurchasedPC, pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         form = QualityCheckForm(request.POST, purchased_pc=pc)
         if not form.is_valid():
             messages.error(request, "Choose a check, and include a reason when it fails.")
@@ -831,7 +824,7 @@ def record_quality_check(request, pk):
                         )
                         if available > 0:
                             pc.status = "corrective_work"
-                            pc.hold_reason = "A working replacement is reserved; retest this check."
+                            pc.hold_reason = "A working replacement is reserved. Repeat all quality checks."
                         else:
                             pc.hold_reason = f"{note} No working unit is available; use a US-A11 substitution."
                 pc.save(update_fields=("status", "hold_reason"))
@@ -879,7 +872,8 @@ def record_quality_check(request, pk):
                     messages.success(request, f"PC #{pc.pk} passed quality checks.")
                 elif pc.status == "corrective_work":
                     pc.status = "quality_checking"
-                    pc.save(update_fields=("status",))
+                    pc.hold_reason = ""
+                    pc.save(update_fields=("status", "hold_reason"))
                     messages.success(request, "Check recorded; continue the remaining tests.")
                 else:
                     messages.success(request, "Check recorded.")
@@ -893,10 +887,9 @@ def hold_pc(request, pk):
     if not form.is_valid():
         messages.error(request, "Enter a reason before placing the PC on hold.")
         return redirect("orders:order_queue")
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order, pk=order_id)
-        pc = get_object_or_404(PurchasedPC, pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if (
             order.payment_status != "paid"
             or order.status in ("cancelled", "delivered")
