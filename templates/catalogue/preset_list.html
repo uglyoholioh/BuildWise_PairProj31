@@ -3,7 +3,8 @@
 {% block title %}Browse PC presets | BuildWise{% endblock %}
 
 {% block content %}
-<section class="card card-body mb-4">
+<section class="card card-body storefront-intro mb-4">
+  <p class="eyebrow mb-2">Your next PC starts here</p>
   <h1 class="h3 mb-1">Gaming PCs, built around the games you play.</h1>
   <p class="text-body-secondary mb-3">Start with a reviewed preset or choose your own parts. Published builds show
     current catalogue pricing and stock.</p>
@@ -19,7 +20,8 @@
 </section>
 {% if filter_form.errors %}<div class="alert alert-warning" role="alert">{{ filter_form.errors }}</div>{% endif %}
 {% if has_published_presets %}
-<form method="get" class="card card-body mb-4">
+<form method="get" class="card card-body mb-4" aria-labelledby="filter-heading">
+  <div class="d-flex justify-content-between align-items-center mb-3 gap-2"><h2 id="filter-heading" class="h6 mb-0">Find your fit</h2><a href="{% url 'catalogue:preset_list' %}" class="small">Clear filters</a></div>
   <div class="row g-3 align-items-end">
     <div class="col-sm-6 col-lg-2"><label class="form-label" for="min-price">Minimum price</label><input
         class="form-control" id="min-price" type="number" min="0" step="0.01" name="min_price" value="{{ min_price|default_if_none:'' }}">
@@ -43,7 +45,7 @@
   </div>
 </form>
 <div class="row g-3">{% for row in presets %}<div class="col-md-6 col-xl-4">
-    <article class="card h-100">
+    <article class="card h-100 product-card">
       {% if row.configuration.image_url %}
         <img src="{{ row.configuration.image_url }}" alt="{{ row.configuration.name }}" loading="lazy" class="card-img-top preset-image" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
         <div hidden class="border-bottom bg-body-tertiary text-body-secondary text-center p-4">Image unavailable</div>
@@ -54,20 +56,20 @@
         <ul class="list-unstyled small">{% for item in row.configuration.items.all %}{% if item.component.category == "cpu" or item.component.category == "gpu" or item.component.category == "memory" or item.component.category == "storage" %}<li><span class="text-body-secondary">{{ item.component.get_category_display }}:</span> {{ item.component.brand }} {{ item.component.model }}</li>{% endif %}{% endfor %}</ul>
         <p class="mt-auto mb-1">{% if row.has_price %}<strong class="build-price">S${{ row.price }}</strong>{% else %}<span class="text-danger">Price
             unavailable</span>{% endif %}</p>
-        <p class="mb-3">{% if row.available_quantity %}{{ row.available_quantity }} build{% if row.available_quantity != 1 %}s{% endif %} available{% else %}<span class="text-body-secondary">Currently out of stock</span>{% endif %}
+        <p class="mb-3">{% if row.available_quantity %}<span class="stock-label">{{ row.available_quantity }} build{% if row.available_quantity != 1 %}s{% endif %} available</span>{% else %}<span class="text-body-secondary">Currently out of stock</span>{% endif %}
         </p><a class="btn btn-outline-primary btn-sm align-self-start"
           href="{% url 'catalogue:preset_detail' row.configuration.pk %}">View &amp; customise</a>
       </div>
     </article>
   </div>{% empty %}<div class="col-12">
-    <div class="alert alert-info" role="status">No published presets match these filters.</div>
+    <div class="alert alert-info" role="status">No published presets match these filters. <a class="alert-link" href="{% url 'catalogue:preset_list' %}">Clear filters to see all builds</a>.</div>
   </div>{% endfor %}</div>
 {% else %}
 <div class="alert alert-info" role="status">There are no reviewed presets available yet. Here are sample builds to give
   you an idea of the parts in our catalogue; they are not available to purchase.</div>
 {% if demo_presets %}<h2 class="h4 mb-3">Sample build previews</h2>
 <div class="row g-3">{% for configuration in demo_presets %}<div class="col-md-6 col-xl-4">
-    <article class="card h-100">
+    <article class="card h-100 product-card">
       <div class="card-body"><span class="badge text-bg-secondary mb-2">Sample · not for sale</span>
         <h3 class="h5">{{ configuration.name|cut:"[Demo] " }}</h3>
         <p class="text-body-secondary small">Example component selection; prices, stock and compatibility have not been
