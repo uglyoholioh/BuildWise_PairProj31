@@ -1,0 +1,704 @@
+{
+  "observed_at": "2026-11-14",
+  "components": [
+    {
+      "key": "cpu_7500f",
+      "category": "cpu",
+      "brand": "AMD",
+      "model": "Ryzen 5 7500F",
+      "description": "6-core AM5 desktop CPU; discrete graphics required. Wraith Stealth cooler included.",
+      "price": "178.00",
+      "stock": 12,
+      "socket": "AM5",
+      "image": "https://dynacoretech.com/cdn/shop/files/41ayRmoghpL._AC_UF894_1000_QL80.jpg?v=1763027402&width=800",
+      "source_url": "https://dynacoretech.com/products/amd-ryzen-5-7500f-with-wraith-stealth-cooler-tray-processor-3-years-100-10000059",
+      "specs": {
+        "Cores": "6C/12T",
+        "Boost clock": "5.0 GHz",
+        "TDP": "65 W"
+      }
+    },
+    {
+      "key": "cpu_7800x3d",
+      "category": "cpu",
+      "brand": "AMD",
+      "model": "Ryzen 7 7800X3D",
+      "description": "8-core AM5 gaming processor with 96 MB 3D V-Cache. Tray processor; a CPU cooler is required.",
+      "price": "420.00",
+      "stock": 14,
+      "socket": "AM5",
+      "specs": {
+        "Cores": "8C/16T",
+        "Boost clock": "5.0 GHz",
+        "Cache": "96 MB 3D V-Cache",
+        "TDP": "120 W"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/7800X3D.jpg?v=1749915809",
+      "source_url": "https://dynacoretech.com/products/amd-ryzen-7-7800x3d-8-core-am5-zen4-pcie-5-0-cpu-processor"
+    },
+    {
+      "key": "mb_b850m_msi",
+      "category": "motherboard",
+      "brand": "MSI",
+      "model": "B850M Gaming Plus WiFi",
+      "description": "Micro-ATX AM5 motherboard with DDR5 support and Wi-Fi 7.",
+      "price": "289.00",
+      "stock": 18,
+      "socket": "AM5",
+      "memory_type": "DDR5",
+      "form_factor": "Micro-ATX",
+      "image": "https://storage-asset.msi.com/global/picture/image/feature/mb/B850/b850m-gaming-plus-wifi/kv-name.png",
+      "source_url": "https://dynacoretech.com/collections/all-product/products/msi-b850m-gaming-plus-wifi-am5-m-atx-motherboard3yrs-4711377347570",
+      "specs": {
+        "Chipset": "B850",
+        "M.2 slots": "2",
+        "Wi-Fi": "Wi-Fi 7"
+      }
+    },
+    {
+      "key": "mb_b850_gigabyte",
+      "category": "motherboard",
+      "brand": "Gigabyte",
+      "model": "B850 Gaming WIFI6",
+      "description": "ATX AM5 motherboard with DDR5 support, Wi-Fi 6E and three M.2 slots.",
+      "price": "319.00",
+      "stock": 8,
+      "socket": "AM5",
+      "memory_type": "DDR5",
+      "form_factor": "ATX",
+      "specs": {
+        "Chipset": "B850",
+        "M.2 slots": "3",
+        "Wi-Fi": "Wi-Fi 6E"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/sg-11134207-7rdvl-mcblluvz72uva2.jpg?v=1784091124",
+      "source_url": "https://dynacoretech.com/products/gigabyte-b850-gaming-wifi6-am5-atx-motherboard-4719331866631"
+    },
+    {
+      "key": "mb_b850_aorus",
+      "category": "motherboard",
+      "brand": "Gigabyte",
+      "model": "B850 AORUS ELITE WIFI7",
+      "description": "ATX AM5 motherboard with DDR5 support, Wi-Fi 7 and four M.2 slots.",
+      "price": "430.00",
+      "stock": 4,
+      "socket": "AM5",
+      "memory_type": "DDR5",
+      "form_factor": "ATX",
+      "specs": {
+        "Chipset": "B850",
+        "M.2 slots": "4",
+        "Wi-Fi": "Wi-Fi 7"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/sg-11134207-7rbm6-m5e0wzawpox7c1.jpg?v=1784087756",
+      "source_url": "https://dynacoretech.com/products/gigabyte-b850-aorus-elite-wifi7-am5-atx-motherboard-4719331866105"
+    },
+    {
+      "key": "mb_b650i_gigabyte",
+      "category": "motherboard",
+      "brand": "Gigabyte",
+      "model": "B650I AX",
+      "description": "Mini-ITX AM5 motherboard with DDR5 support and Wi-Fi 6E.",
+      "price": "325.00",
+      "stock": 4,
+      "socket": "AM5",
+      "memory_type": "DDR5",
+      "form_factor": "Mini-ITX",
+      "specs": {
+        "Chipset": "B650",
+        "M.2 slots": "2",
+        "Wi-Fi": "Wi-Fi 6E"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/sg-11134207-7rd63-lvd21z2366xi3b.jpg?v=1783999265",
+      "source_url": "https://dynacoretech.com/products/gigabyte-b650i-ax-amd-am5-itx-motherboard-4719331859190"
+    },
+    {
+      "key": "ram_vengeance_6400",
+      "category": "memory",
+      "brand": "Corsair",
+      "model": "Vengeance RGB DDR5 32GB (2x16GB)",
+      "description": "32GB dual-module DDR5 memory kit with EXPO and XMP profiles.",
+      "price": "699.00",
+      "stock": 18,
+      "memory_type": "DDR5",
+      "image": "https://assets.corsair.com/image/upload/c_pad,q_85,h_1100,w_1100,f_auto/products/Memory/vengeance-rgb-amd-ddr5-blk-config/Gallery/2up/VENGEANCE_RGB_DDR5_AMD_2up_01.webp",
+      "source_url": "https://www.corsair.com/us/en/p/memory/cmh32gx5m2b6400z36/vengeance-rgb-32gb-2x16gb-ddr5-dram-6400mt-s-cl36-memory-kit-cmh32gx5m2b6400z36",
+      "specs": {
+        "Capacity": "32 GB (2×16 GB)",
+        "Speed": "6400 MT/s",
+        "Profile": "EXPO / XMP"
+      }
+    },
+    {
+      "key": "ram_vengeance_6000",
+      "category": "memory",
+      "brand": "Corsair",
+      "model": "Vengeance RGB DDR5 6000 CL30 32GB (2x16GB)",
+      "description": "32GB dual-module DDR5 kit tuned for low-latency gaming builds.",
+      "price": "920.00",
+      "stock": 4,
+      "memory_type": "DDR5",
+      "specs": {
+        "Capacity": "32 GB (2×16 GB)",
+        "Speed": "6000 MT/s",
+        "Latency": "CL30"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/61EVf-QxpvL._AC_SX522.jpg?v=1755598553",
+      "source_url": "https://dynacoretech.com/products/corsair-vengeance-rgb-ddr5-grey-6000mhz-32gb16gbx2-cl30-kitlimited-lt-840006600107ram"
+    },
+    {
+      "key": "gpu_rtx5060",
+      "category": "gpu",
+      "brand": "Gigabyte",
+      "model": "GeForce RTX 5060 OC 8G Low Profile",
+      "description": "8GB GDDR7 graphics card in a compact low-profile design.",
+      "price": "799.00",
+      "stock": 12,
+      "ml_tier": "mid",
+      "image": "https://dynacoretech.com/cdn/shop/files/PC1_379cae90-8c16-4383-b564-1b5f4165569b.png?v=1784782529&width=800",
+      "source_url": "https://dynacoretech.com/collections/gpu?limit=9&page=1",
+      "specs": {
+        "VRAM": "8 GB GDDR7",
+        "Fans": "Dual",
+        "Design": "Low profile"
+      }
+    },
+    {
+      "key": "gpu_rx9070xt",
+      "category": "gpu",
+      "brand": "XFX",
+      "model": "Swift Radeon RX 9070 XT 16GB",
+      "description": "16GB triple-fan graphics card for high-refresh 1440p gaming.",
+      "price": "1469.00",
+      "stock": 10,
+      "ml_tier": "high",
+      "image": "https://dynacoretech.com/cdn/shop/files/1_fc0e0bc2-ea88-4c6e-beac-75b4a9c6aaeb.png?v=1775121299&width=800",
+      "source_url": "https://dynacoretech.com/products/xfx-swift-amd-radeon-rx-9070xt-triple-fan-gaming-edition-16gb-gddr6-graphics-card-840191502750",
+      "specs": {
+        "VRAM": "16 GB GDDR6",
+        "Fans": "Triple",
+        "Boost clock": "~3.0 GHz"
+      }
+    },
+    {
+      "key": "ssd_kioxia_basic",
+      "category": "storage",
+      "brand": "Kioxia",
+      "model": "Exceria Basic 1TB NVMe PCIe 4.0",
+      "description": "1TB M.2 NVMe solid-state drive with PCIe 4.0 interface.",
+      "price": "255.00",
+      "stock": 16,
+      "image": "https://dynacoretech.com/cdn/shop/files/1_095776f4-9104-46f9-bd8f-66ddb53f63aa.png?v=1775736836&width=800",
+      "source_url": "https://dynacoretech.com/products/kioxia-exceria-basic-1tb-7200mb-s-nvme-pcie4-0-m-2-ssd-4582761161108",
+      "specs": {
+        "Capacity": "1 TB",
+        "Interface": "PCIe 4.0 NVMe",
+        "Read": "7,200 MB/s"
+      }
+    },
+    {
+      "key": "ssd_kioxia_plus",
+      "category": "storage",
+      "brand": "Kioxia",
+      "model": "Exceria Plus G3 1TB NVMe PCIe 4.0",
+      "description": "1TB M.2 NVMe drive with PCIe 4.0 interface and a five-year warranty.",
+      "price": "296.00",
+      "stock": 10,
+      "specs": {
+        "Capacity": "1 TB",
+        "Interface": "PCIe 4.0 NVMe",
+        "Read": "5,000 MB/s"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/KIOXIA_2f96072b-68a6-4b0b-bd89-8920d98595c3.jpg?v=1788508570",
+      "source_url": "https://dynacoretech.com/products/kioxia-exceria-plus-g3-nvme-ssd-r5000-w3900-pcie4x4-1tb"
+    },
+    {
+      "key": "ssd_wd_sn8100",
+      "category": "storage",
+      "brand": "WD",
+      "model": "Black SN8100 1TB NVMe PCIe 5.0",
+      "description": "1TB PCIe 5.0 NVMe drive for high-throughput gaming and content work.",
+      "price": "389.00",
+      "stock": 6,
+      "specs": {
+        "Capacity": "1 TB",
+        "Interface": "PCIe 5.0 NVMe",
+        "Read": "14,900 MB/s"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/SN8100.jpg?v=1788353618",
+      "source_url": "https://dynacoretech.com/products/wd_black-western-digital-sn8100-1tb-2tb-4tb-8tb-nvme-m-2"
+    },
+    {
+      "key": "psu_thermalright",
+      "category": "power_supply",
+      "brand": "Thermalright",
+      "model": "TR-KG850W 850W Gold ATX 3.1",
+      "description": "850W fully modular 80 Plus Gold power supply with ATX 3.1 support.",
+      "price": "119.00",
+      "stock": 16,
+      "image": "https://dynacoretech.com/cdn/shop/files/ThermalrightTR-KG850W03.png?v=1783052602&width=800",
+      "source_url": "https://dynacoretech.com/products/thermalright-tr-kg850w-80-plus-gold-modular-atx-3-1-power-supply-white-814256019774",
+      "specs": {
+        "Wattage": "850 W",
+        "Efficiency": "80+ Gold",
+        "Standard": "ATX 3.1"
+      }
+    },
+    {
+      "key": "psu_adata",
+      "category": "power_supply",
+      "brand": "Adata",
+      "model": "Core Shift II VE 850W Gold ATX 3.1",
+      "description": "850W 80 Plus Gold power supply with ATX 3.1 and PCIe 5.1 support.",
+      "price": "129.00",
+      "stock": 8,
+      "specs": {
+        "Wattage": "850 W",
+        "Efficiency": "80+ Gold",
+        "Standard": "ATX 3.1"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/ADATACOREDSHIFTIIVE850GD-BKCGB.png?v=1794400371",
+      "source_url": "https://dynacoretech.com/products/adata-core-shift-ii-ve-850w-80-plus-gold-atx-3-1-pcie-5-1-non-modular-power-supply-4711658156822"
+    },
+    {
+      "key": "psu_seasonic",
+      "category": "power_supply",
+      "brand": "Seasonic",
+      "model": "Focus GX-850 V4 850W Gold ATX 3.1",
+      "description": "850W fully modular 80 Plus Gold power supply with ATX 3.1 and PCIe 5.1 support.",
+      "price": "225.00",
+      "stock": 5,
+      "specs": {
+        "Wattage": "850 W",
+        "Efficiency": "80+ Gold",
+        "Standard": "ATX 3.1"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/sg-11134207-821ec-mgj4fp2cp4p725.jpg?v=1776848343",
+      "source_url": "https://dynacoretech.com/products/seasonic-focus-gx-850w-v4-atx3-1-pcie-5-1-80-gold-full-modular-psu-4711173878438"
+    },
+    {
+      "key": "case_corsair_3500x",
+      "category": "case",
+      "brand": "Corsair",
+      "model": "3500X Tempered Glass Micro-ATX Black",
+      "description": "Tempered-glass Micro-ATX case with three included fans.",
+      "price": "125.00",
+      "stock": 16,
+      "form_factor": "Micro-ATX",
+      "image": "https://assets.corsair.com/image/upload/c_pad,q_85,h_1100,w_1100,f_auto/products/Cases/3500x/gallery/black/3500X_BLK_01.webp",
+      "source_url": "https://www.corsair.com/us/en/p/pc-cases/cc-9011276-ww/3500x-mid-tower-pc-case-cc-9011276-ww",
+      "specs": {
+        "Motherboard support": "Micro-ATX",
+        "Side panel": "Tempered glass",
+        "Included fans": "3"
+      }
+    },
+    {
+      "key": "case_phanteks_xtv5",
+      "category": "case",
+      "brand": "Phanteks",
+      "model": "XT V5 Tempered Glass ATX Black",
+      "description": "Compact ATX case with a tempered-glass side panel and high-airflow mesh front.",
+      "price": "129.00",
+      "stock": 6,
+      "form_factor": "ATX, Micro-ATX",
+      "specs": {
+        "Motherboard support": "ATX, Micro-ATX",
+        "Side panel": "Tempered glass",
+        "Included fans": "3"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/PHAXTV5BLK-01.png?v=1788433126",
+      "source_url": "https://dynacoretech.com/products/phanteks-xt-v5-tempered-glass-compact-d-rgb-atx-gaming-pc-case-black-phaxtv5blk"
+    },
+    {
+      "key": "case_tt_view290",
+      "category": "case",
+      "brand": "Thermaltake",
+      "model": "View 290 Tempered Glass ARGB ATX Black",
+      "description": "Mid-tower ATX case with curved tempered glass and three ARGB fans.",
+      "price": "149.00",
+      "stock": 4,
+      "form_factor": "ATX, Micro-ATX",
+      "specs": {
+        "Motherboard support": "ATX, Micro-ATX",
+        "Side panel": "Curved tempered glass",
+        "Included fans": "3 ARGB"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/ThermaltakeCA-11G-00M1WN-00.png?v=1787568106",
+      "source_url": "https://dynacoretech.com/products/thermaltake-view-290-tempered-glass-argb-mid-tower-atx-pc-case-black-ca-11g-00m1wn-00"
+    },
+    {
+      "key": "case_fractal_north",
+      "category": "case",
+      "brand": "Fractal Design",
+      "model": "North Chalk White Tempered Glass ATX",
+      "description": "Mid-tower ATX case with an oak wood front and tempered-glass side panel.",
+      "price": "259.00",
+      "stock": 0,
+      "form_factor": "ATX, Micro-ATX",
+      "specs": {
+        "Motherboard support": "ATX, Micro-ATX",
+        "Front": "Oak wood",
+        "Included fans": "2"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/pc1_77461690-a8cf-46d8-b03e-a066763891eb.png?v=1785987663",
+      "source_url": "https://dynacoretech.com/products/fractal-design-north-chalk-white-mid-tower-pc-case-clear-tempered-glass-oak-wood-front-fdnorthchkwhttg"
+    },
+    {
+      "key": "case_tt_tr100",
+      "category": "case",
+      "brand": "Thermaltake",
+      "model": "TR100 Mini-ITX Tower Black",
+      "description": "Mini-ITX tower case with a compact footprint and tempered-glass panel.",
+      "price": "179.00",
+      "stock": 3,
+      "form_factor": "Mini-ITX",
+      "specs": {
+        "Motherboard support": "Mini-ITX",
+        "Side panel": "Tempered glass",
+        "Included fans": "1"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/pc1_3ad25c5c-4289-489c-aa14-bc80db1d7e51.png?v=1787630837",
+      "source_url": "https://dynacoretech.com/products/thermaltake-tr100-m-itx-mini-tower-pc-case-black-ca-11a-00s1nn-00"
+    },
+    {
+      "key": "cooler_phantom",
+      "category": "cooler",
+      "brand": "Thermalright",
+      "model": "Phantom Spirit 120 SE ARGB",
+      "description": "Dual-tower CPU air cooler with two 120mm ARGB fans.",
+      "price": "53.00",
+      "stock": 12,
+      "image": "https://dynacoretech.com/cdn/shop/files/814256015578.jpg?v=1750612745&width=800",
+      "source_url": "https://dynacoretech.com/collections/all-product/products/thermalright-phantom-spirit-120-se-argb-cpu-fan-cooler-dual-tower-heatsink-814256015578",
+      "specs": {
+        "Type": "Dual-tower air",
+        "Height": "157 mm",
+        "Fans": "2× 120 mm"
+      }
+    },
+    {
+      "key": "cooler_hyper212",
+      "category": "cooler",
+      "brand": "Cooler Master",
+      "model": "Hyper 212 Flow ARGB",
+      "description": "Single-tower CPU air cooler with a 120mm ARGB fan.",
+      "price": "29.00",
+      "stock": 8,
+      "specs": {
+        "Type": "Single-tower air",
+        "Height": "152 mm",
+        "Fan": "1× 120 mm ARGB"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/CoolerMasterMAX-T4PN-217PA-R103.png?v=1790231450",
+      "source_url": "https://dynacoretech.com/products/cooler-master-hyper-212-flow-argb-heatsink-cpu-cooler-black-4719512168646"
+    },
+    {
+      "key": "cooler_corevision",
+      "category": "cooler",
+      "brand": "Thermalright",
+      "model": "Core Vision LCD 360 ARGB",
+      "description": "360mm liquid CPU cooler with an LCD pump cover and three ARGB fans.",
+      "price": "149.00",
+      "stock": 4,
+      "specs": {
+        "Type": "360 mm AIO",
+        "Display": "LCD pump cover",
+        "Fans": "3× 120 mm ARGB"
+      },
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/1-13_99ea3975-2f4e-4ee6-98d7-1bbf8a374fb5.jpg?v=1755836161",
+      "source_url": "https://dynacoretech.com/products/thermalright-core-vision-lcd-360-argb-black-white-aio-liquid-cooler3yrs"
+    }
+  ],
+  "accessories": [
+    {
+      "name": "Logitech MK235 Wireless Keyboard and Mouse Combo",
+      "category": "Keyboard and mouse combo",
+      "price": "25.00",
+      "stock": 50,
+      "image": "https://online.challenger.sg/cdn/shop/files/2c7d0bdf43ba8b94d03bb8ce4265600f.png?v=1759396626&width=1200",
+      "source_url": "https://online.challenger.sg/products/logitech-mk235-wireless-keyboard-and-mouse-combo"
+    },
+    {
+      "name": "Logitech G203 LIGHTSYNC Gaming Mouse (Black)",
+      "category": "Gaming mouse",
+      "price": "24.90",
+      "stock": 50,
+      "image": "https://online.challenger.sg/cdn/shop/files/g203-bk_1.jpg?v=1782964577&width=800",
+      "source_url": "https://online.challenger.sg/products/logitech-g203-gen2-lightsync-gaming-mouse-black"
+    },
+    {
+      "name": "Razer Huntsman V3 8KHz TKL Wired Gaming Keyboard",
+      "category": "Gaming keyboard",
+      "price": "251.00",
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/HMV3TKL_1.jpg?v=1794468411",
+      "source_url": "https://online.challenger.sg/products/razer-huntsman-v3-8khz-tkl-wired-gaming-keyboard"
+    },
+    {
+      "name": "Razer Reclusa X Mini Wired Gaming Keyboard",
+      "category": "Gaming keyboard",
+      "price": "89.00",
+      "stock": 30,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/reclusaxmini65.jpg?v=1792564941",
+      "source_url": "https://online.challenger.sg/products/razer-reclusa-x-mini-65-wired-kb"
+    },
+    {
+      "name": "Armaggeddon MKA-2C Neo v3 Clicky Keyboard Black",
+      "category": "Gaming keyboard",
+      "price": "38.00",
+      "stock": 30,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/Armaggeddon_MKA-2C_Neo_v3_Clicky_1_9dcdebdc-274e-4ed6-9fc8-df25e7f80d6b.jpg?v=1793003090",
+      "source_url": "https://online.challenger.sg/products/armaggeddon-mka-2c-neo-v3-clicky-kb-black"
+    },
+    {
+      "name": "Razer Viper V3 Pro SE Wireless Gaming Mouse (Wuthering Waves Edition)",
+      "category": "Gaming mouse",
+      "price": "163.00",
+      "stock": 20,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/VV3PSEWW-1.jpg?v=1794297255",
+      "source_url": "https://online.challenger.sg/products/razer-viper-v3-pro-se-wless-mse-wuthering-waves"
+    },
+    {
+      "name": "Razer Basilisk V4 HyperSpeed Wireless Gaming Mouse (Black)",
+      "category": "Gaming mouse",
+      "price": "163.00",
+      "stock": 20,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/basiliskv4hs-blk_1.jpg?v=1792567291",
+      "source_url": "https://online.challenger.sg/products/razer-basilisk-v4-hyperspeed-wless-mse-black"
+    },
+    {
+      "name": "Logitech G Pro X Superlight 2 Wireless Gaming Mouse (Cyan)",
+      "category": "Gaming mouse",
+      "price": "179.00",
+      "stock": 20,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/ProXSuperlight2Cyan1.jpg?v=1793953959",
+      "source_url": "https://online.challenger.sg/products/logitech-g-pro-x-superlight-2-wless-mse-cyan"
+    },
+    {
+      "name": "JBL Quantum 120 Over-Ear Gaming Wired Headphones Black",
+      "category": "Gaming headset",
+      "price": "65.55",
+      "stock": 50,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/Quantum120Blk5.jpg?v=1794292705",
+      "source_url": "https://online.challenger.sg/products/jbl-quantum-120-over-ear-gaming-wired-headphones-black"
+    },
+    {
+      "name": "Edifier WH880NB ANC BT Headphones - Black",
+      "category": "Gaming headset",
+      "price": "122.55",
+      "stock": 25,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/WH880NB-BLK1.jpg?v=1793686775",
+      "source_url": "https://online.challenger.sg/products/edifier-wh880nb-anc-bt-headphones-black"
+    },
+    {
+      "name": "Razer Gigantus V2 Soft Gaming Mousepad (XXL - Wuthering Waves Edition)",
+      "category": "Mousepad",
+      "price": "76.60",
+      "stock": 40,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/GGV2WW_1.jpg?v=1794465207",
+      "source_url": "https://online.challenger.sg/products/razer_gigantus-v2-xxl-mousepad-wuthering-waves"
+    },
+    {
+      "name": "Lenovo LOQ 27-10 27\" FHD IPS 200Hz Gaming Monitor",
+      "category": "Gaming monitor",
+      "price": "159.00",
+      "stock": 15,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/LenovoLOQ27-10_Monitor.jpg?v=1789527858",
+      "source_url": "https://online.challenger.sg/products/lenovo-68f2gacbmy-fhd-loq-27-10-27-monitor-gy"
+    },
+    {
+      "name": "Philips 27B2N2200G 27\" FHD IPS 144Hz Monitor",
+      "category": "Gaming monitor",
+      "price": "165.00",
+      "stock": 15,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/27B2N2200GF.jpg?v=1783564160",
+      "source_url": "https://online.challenger.sg/products/philips-27b2n2200g-27-fhd-monitor"
+    },
+    {
+      "name": "AOC CQ27G4S 27\" VA QHD Dual Mode Curved Gaming Monitor",
+      "category": "Gaming monitor",
+      "price": "349.00",
+      "stock": 10,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/CQ27G4S_69_V1.jpg?v=1790217883",
+      "source_url": "https://online.challenger.sg/products/aoc-cq27g4s-qhd-27-curved-monitor-bk"
+    },
+    {
+      "name": "Asus ROG Raikiri Wired Controller XBOX/PC",
+      "category": "Controller",
+      "price": "129.00",
+      "stock": 25,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/raikiriwired_1.jpg?v=1792640492",
+      "source_url": "https://online.challenger.sg/products/asus-rog-raikiri-wired-controller-xbox-pc"
+    },
+    {
+      "name": "Sony PS5 DualSense Wireless Controller - GTA VI Black Limited Edition",
+      "category": "Controller",
+      "price": "115.00",
+      "stock": 20,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/DUALSENSE_LE_GTA6_PR_01_BLACK_RGB.jpg?v=1789351534",
+      "source_url": "https://online.challenger.sg/products/sony-ps5-dualsense-wireless-controller-gta-vi-black"
+    },
+    {
+      "name": "Northbayou A5-XE Single Monitor Mount (White)",
+      "category": "Monitor mount",
+      "price": "38.00",
+      "stock": 30,
+      "image": "https://cdn.shopify.com/s/files/1/0614/3180/8075/files/A5-XE_01.png?v=1789702740",
+      "source_url": "https://online.challenger.sg/products/northbayou-a5-xe-single-monitor-mount-white"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "BuildWise Core 5060",
+      "description": "A balanced 1080p gaming build with the Ryzen 5 7500F and GeForce RTX 5060. Includes 32GB DDR5, a 1TB NVMe drive and a compact tempered-glass case. The 7500F ships with a Wraith Stealth cooler.",
+      "image": "https://assets.corsair.com/image/upload/c_pad,q_85,h_1100,w_1100,f_auto/products/Cases/3500x/gallery/black/3500X_BLK_01.webp",
+      "source_url": "https://www.corsair.com/us/en/p/pc-cases/cc-9011276-ww/3500x-mid-tower-pc-case-cc-9011276-ww",
+      "status": "published",
+      "components": [
+        "cpu_7500f",
+        "mb_b850m_msi",
+        "ram_vengeance_6400",
+        "gpu_rtx5060",
+        "ssd_kioxia_basic",
+        "psu_thermalright",
+        "case_corsair_3500x"
+      ]
+    },
+    {
+      "name": "BuildWise Creator 5060",
+      "description": "Adds the 8-core Ryzen 7 7800X3D and a dual-tower air cooler to the RTX 5060 platform. Suited to high-refresh 1080p gaming and heavier multitasking.",
+      "image": "https://dynacoretech.com/cdn/shop/files/PC1_379cae90-8c16-4383-b564-1b5f4165569b.png?v=1784782529&width=800",
+      "source_url": "https://www.corsair.com/us/en/p/pc-cases/cc-9011276-ww/3500x-mid-tower-pc-case-cc-9011276-ww",
+      "status": "published",
+      "components": [
+        "cpu_7800x3d",
+        "mb_b850m_msi",
+        "ram_vengeance_6400",
+        "gpu_rtx5060",
+        "ssd_kioxia_basic",
+        "psu_thermalright",
+        "case_corsair_3500x",
+        "cooler_phantom"
+      ]
+    },
+    {
+      "name": "BuildWise Core 9070 XT",
+      "description": "The RX 9070 XT paired with the Ryzen 5 7500F for strong 1440p performance. 32GB DDR5 and an 850W Gold power supply leave room for future upgrades.",
+      "image": "https://dynacoretech.com/cdn/shop/files/1_fc0e0bc2-ea88-4c6e-beac-75b4a9c6aaeb.png?v=1775121299&width=800",
+      "source_url": "https://www.corsair.com/us/en/p/pc-cases/cc-9011276-ww/3500x-mid-tower-pc-case-cc-9011276-ww",
+      "status": "published",
+      "components": [
+        "cpu_7500f",
+        "mb_b850m_msi",
+        "ram_vengeance_6400",
+        "gpu_rx9070xt",
+        "ssd_kioxia_basic",
+        "psu_thermalright",
+        "case_corsair_3500x"
+      ]
+    },
+    {
+      "name": "BuildWise Performance 9070 XT",
+      "description": "Our 1440p performance build: Ryzen 7 7800X3D, RX 9070 XT, 32GB DDR5 and a 1TB PCIe 4.0 SSD in a high-airflow ATX case.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/PHAXTV5BLK-01.png?v=1788433126",
+      "source_url": "https://dynacoretech.com/products/phanteks-xt-v5-tempered-glass-compact-d-rgb-atx-gaming-pc-case-black-phaxtv5blk",
+      "status": "published",
+      "components": [
+        "cpu_7800x3d",
+        "mb_b850_gigabyte",
+        "ram_vengeance_6400",
+        "gpu_rx9070xt",
+        "ssd_kioxia_plus",
+        "psu_adata",
+        "case_phanteks_xtv5",
+        "cooler_phantom"
+      ]
+    },
+    {
+      "name": "BuildWise Elite 9070 XT",
+      "description": "A premium 1440p and 4K build with the Aorus B850 Elite, 6000 MT/s CL30 memory, Gen5 storage and a 360mm LCD liquid cooler.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/ThermaltakeCA-11G-00M1WN-00.png?v=1787568106",
+      "source_url": "https://dynacoretech.com/products/thermaltake-view-290-tempered-glass-argb-mid-tower-atx-pc-case-black-ca-11g-00m1wn-00",
+      "status": "published",
+      "components": [
+        "cpu_7800x3d",
+        "mb_b850_aorus",
+        "ram_vengeance_6000",
+        "gpu_rx9070xt",
+        "ssd_wd_sn8100",
+        "psu_seasonic",
+        "case_tt_view290",
+        "cooler_corevision"
+      ]
+    },
+    {
+      "name": "BuildWise Signature 9070 XT",
+      "description": "Signature edition with the Fractal Design North chassis, Gen5 storage and a 360mm liquid cooler. Limited stock.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/pc1_77461690-a8cf-46d8-b03e-a066763891eb.png?v=1785987663",
+      "source_url": "https://dynacoretech.com/products/fractal-design-north-chalk-white-mid-tower-pc-case-clear-tempered-glass-oak-wood-front-fdnorthchkwhttg",
+      "status": "published",
+      "components": [
+        "cpu_7800x3d",
+        "mb_b850_gigabyte",
+        "ram_vengeance_6400",
+        "gpu_rx9070xt",
+        "ssd_wd_sn8100",
+        "psu_seasonic",
+        "case_fractal_north",
+        "cooler_corevision"
+      ]
+    },
+    {
+      "name": "BuildWise Air 5060",
+      "description": "A quieter air-cooled RTX 5060 build with the Gigabyte B850 Gaming motherboard and a Seasonic Gold power supply.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/ThermaltakeCA-11G-00M1WN-00.png?v=1787568106",
+      "source_url": "https://dynacoretech.com/products/thermaltake-view-290-tempered-glass-argb-mid-tower-atx-pc-case-black-ca-11g-00m1wn-00",
+      "status": "published",
+      "components": [
+        "cpu_7500f",
+        "mb_b850_gigabyte",
+        "ram_vengeance_6400",
+        "gpu_rtx5060",
+        "ssd_kioxia_plus",
+        "psu_seasonic",
+        "case_tt_view290",
+        "cooler_hyper212"
+      ]
+    },
+    {
+      "name": "BuildWise Mini 5060",
+      "description": "Compact Mini-ITX version of the 5060 build. Awaiting final stock and pricing checks.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/pc1_3ad25c5c-4289-489c-aa14-bc80db1d7e51.png?v=1787630837",
+      "source_url": "https://dynacoretech.com/products/thermaltake-tr100-m-itx-mini-tower-pc-case-black-ca-11a-00s1nn-00",
+      "status": "draft",
+      "components": [
+        "cpu_7500f",
+        "mb_b650i_gigabyte",
+        "ram_vengeance_6400",
+        "gpu_rtx5060",
+        "ssd_kioxia_basic",
+        "psu_thermalright",
+        "case_tt_tr100",
+        "cooler_hyper212"
+      ]
+    },
+    {
+      "name": "BuildWise Performance 9070 XT - 2025 Edition",
+      "description": "Previous 9070 XT configuration, retired when the B850 Gaming platform replaced it.",
+      "image": "https://cdn.shopify.com/s/files/1/0891/2889/4755/files/PHAXTV5BLK-01.png?v=1788433126",
+      "source_url": "https://dynacoretech.com/products/phanteks-xt-v5-tempered-glass-compact-d-rgb-atx-gaming-pc-case-black-phaxtv5blk",
+      "status": "withdrawn",
+      "components": [
+        "cpu_7500f",
+        "mb_b850_gigabyte",
+        "ram_vengeance_6400",
+        "gpu_rx9070xt",
+        "ssd_wd_sn8100",
+        "psu_seasonic",
+        "case_phanteks_xtv5",
+        "cooler_phantom"
+      ]
+    }
+  ]
+}
