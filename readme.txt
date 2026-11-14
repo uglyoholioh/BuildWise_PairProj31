@@ -96,12 +96,6 @@ SPECIAL NOTES
 - External product images may be unavailable if their source is offline.
 - The supplied settings are for local development and assessment.
 
-REPOSITORY HISTORY
-
-This repository is a submission copy. Its Git history was reorganised for
-submission. Some historical merge messages refer to pull requests that are
-unavailable in this repository. See the commit log for the associated changes.
-
 SUBMISSION CONTENTS
 
 One ZIP: docs/PP31.docx and the Django project folder under source/.
