@@ -43,7 +43,7 @@
                       </form>
                     {% else %}
                     {% if pc.status == "queued" or pc.status == "on_hold" %}
-                      <form method="post" action="{% url 'orders:start_order' pc.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Start assembly</button></form>
+                      <form method="post" action="{% url 'orders:start_order' pc.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">{% if pc.assembly_started %}Resume work{% else %}Start assembly{% endif %}</button></form>
                     {% endif %}
                     {% if pc.status == "queued" or pc.status == "assembling" %}
                       <form class="d-flex gap-2" method="post" action="{% url 'orders:hold_pc' pc.pk %}">{% csrf_token %}<label class="visually-hidden" for="hold-{{ pc.pk }}">Reason PC {{ pc.pk }} is on hold</label><input class="form-control form-control-sm" id="hold-{{ pc.pk }}" name="reason" placeholder="Reason for hold" required><button class="btn btn-outline-danger btn-sm" type="submit">Put on hold</button></form>
