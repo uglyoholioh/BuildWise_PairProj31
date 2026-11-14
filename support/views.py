@@ -2,13 +2,14 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Customer, StaffAction
 from accounts.views import staff_required
 from orders.models import Order, PurchasedPC
-from .forms import CustomerMessageForm, ReviewForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
+from .forms import CustomerMessageForm, ReviewForm, SupportFilterForm, SupportMessageForm, SupportRequestForm, SupportStatusForm
 from .models import Review, SupportMessage, SupportRequest
 
 
@@ -38,9 +39,9 @@ def review_create(request, pk):
     form = ReviewForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            # Match fulfilment's lock order and recheck eligibility at submission.
-            order = get_object_or_404(Order.objects.select_for_update(), pk=order.pk, customer__user=request.user)
-            pc = get_object_or_404(PurchasedPC.objects.select_for_update().select_related("order_line__order"), pk=pk)
+            # Recheck eligibility at submission.
+            order = get_object_or_404(Order, pk=order.pk, customer__user=request.user)
+            pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
             if not pc.review_eligible:
                 messages.error(request, "This PC is no longer eligible for a review.")
                 return redirect("orders:order_detail", pk=order.pk)
@@ -64,20 +65,21 @@ def review_create(request, pk):
     return render(request, "support/review_form.html", {"pc": pc, "form": form})
 
 
-def placeholder(request, *args, **kwargs):
-    return render(request, "support/placeholder.html")
-
-
 @staff_required
 def staff_request_list(request):
     requests = SupportRequest.objects.select_related("customer", "order").order_by("-created_at", "-pk")
-    status = request.GET.get("status", "").strip()
-    order_id = request.GET.get("order", "").strip()
-    if status in {"open", "in_progress", "closed"}:
-        requests = requests.filter(status=status)
-    if order_id.isdecimal():
-        requests = requests.filter(order_id=int(order_id))
-    return render(request, "support/staff_list.html", {"requests": requests, "status": status, "order_id": order_id})
+    form = SupportFilterForm(request.GET or None)
+    if form.is_bound:
+        if form.is_valid():
+            status = form.cleaned_data["status"]
+            order_id = form.cleaned_data["order"]
+            if status:
+                requests = requests.filter(status=status)
+            if order_id is not None:
+                requests = requests.filter(order_id=order_id)
+        else:
+            requests = requests.none()
+    return render(request, "support/staff_list.html", {"requests": requests, "form": form})
 
 
 @staff_required
@@ -87,25 +89,30 @@ def staff_request_detail(request, pk):
         SupportRequest.objects.select_related("customer", "order").prefetch_related("messages__employee__user"),
         pk=pk,
     )
-    message_form = SupportMessageForm(request.POST if request.method == "POST" and request.POST.get("action") == "message" else None)
+    action = request.POST.get("action") if request.method == "POST" else None
+    message_form = SupportMessageForm(request.POST if action == "message" else None)
     status_form = SupportStatusForm(
-        request.POST if request.method == "POST" and request.POST.get("action") == "status" else None,
+        request.POST if action == "status" else None,
         instance=support_request,
     )
     if request.method == "POST":
         with transaction.atomic():
-            locked = get_object_or_404(SupportRequest.objects.select_for_update(), pk=pk)
-            if request.POST.get("action") == "message" and message_form.is_valid():
+            locked = get_object_or_404(SupportRequest, pk=pk)
+            if action == "message" and message_form.is_valid():
+                staff_only = message_form.cleaned_data["is_staff_only"]
+                if locked.status == "closed" and not staff_only:
+                    messages.error(request, "Reopen this conversation before sending a public reply.")
+                    return redirect("support:staff_request_detail", pk=pk)
                 SupportMessage.objects.create(
                     request=locked,
                     sender_type="employee",
                     employee=request.user.employee_profile,
-                    is_staff_only=message_form.cleaned_data["is_staff_only"],
+                    is_staff_only=staff_only,
                     body=message_form.cleaned_data["body"],
                 )
                 messages.success(request, "Reply or staff note recorded.")
                 return redirect("support:staff_request_detail", pk=pk)
-            if request.POST.get("action") == "status" and status_form.is_valid():
+            if action == "status" and status_form.is_valid():
                 old_status = locked.status
                 new_status = status_form.cleaned_data["status"]
                 locked.status = new_status
@@ -141,14 +148,15 @@ def request_create(request):
     customer = get_object_or_404(Customer, user=request.user)
     form = SupportRequestForm(request.POST if request.method == "POST" else None, customer=customer)
     if request.method == "POST" and form.is_valid():
-        support_request = SupportRequest.objects.create(
-            customer=customer, order=form.cleaned_data["order"]
-        )
-        SupportMessage.objects.create(
-            request=support_request,
-            sender_type="customer",
-            body=form.cleaned_data["body"],
-        )
+        with transaction.atomic():
+            support_request = SupportRequest.objects.create(
+                customer=customer, order=form.cleaned_data["order"]
+            )
+            SupportMessage.objects.create(
+                request=support_request,
+                sender_type="customer",
+                body=form.cleaned_data["body"],
+            )
         messages.success(request, "Support request submitted.")
         return redirect("support:request_detail", pk=support_request.pk)
     return render(request, "support/request_form.html", {"form": form})
@@ -159,17 +167,25 @@ def request_create(request):
 def request_detail(request, pk):
     customer = get_object_or_404(Customer, user=request.user)
     support_request = get_object_or_404(
-        SupportRequest.objects.select_related("order").prefetch_related("messages"),
+        SupportRequest.objects.select_related("order").prefetch_related(
+            Prefetch("messages", queryset=SupportMessage.objects.filter(is_staff_only=False).order_by("created_at", "pk"),
+                     to_attr="public_messages")
+        ),
         pk=pk,
         customer=customer,
     )
     form = CustomerMessageForm(request.POST) if request.method == "POST" else CustomerMessageForm()
-    if request.method == "POST" and form.is_valid() and support_request.status != "closed":
-        SupportMessage.objects.create(
-            request=support_request,
-            sender_type="customer",
-            body=form.cleaned_data["body"],
-        )
-        messages.success(request, "Message sent.")
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            locked = get_object_or_404(SupportRequest, pk=pk, customer=customer)
+            if locked.status == "closed":
+                messages.error(request, "This conversation is closed.")
+            else:
+                SupportMessage.objects.create(
+                    request=locked,
+                    sender_type="customer",
+                    body=form.cleaned_data["body"],
+                )
+                messages.success(request, "Message sent.")
         return redirect("support:request_detail", pk=pk)
     return render(request, "support/customer_detail.html", {"support_request": support_request, "form": form})

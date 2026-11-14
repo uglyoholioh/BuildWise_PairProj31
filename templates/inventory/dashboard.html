@@ -8,9 +8,6 @@
   <a class="btn btn-primary" href="{% url 'inventory:adjustment_create' %}">Record adjustment</a>
 </div>
 
-{% for message in messages %}
-  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
-{% endfor %}
 
 {% if inspections %}
 <section class="card mb-4">

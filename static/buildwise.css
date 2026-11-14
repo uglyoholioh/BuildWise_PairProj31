@@ -1,0 +1,11 @@
+.preset-image {
+  height: 10rem;
+  object-fit: contain;
+  padding: 1rem;
+}
+
+.build-price {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

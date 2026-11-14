@@ -7,18 +7,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer
-from catalogue.models import AssemblyFeeSetting, Component, Configuration
-from catalogue.compatibility import check_configuration_components
-from catalogue.pricing import available_preset_quantity, calculate_pc_price
+from catalogue.drafts import build_revision
+from catalogue.compatibility import check_configuration_components, check_preset_items
+from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from .forms import QuestionnaireForm, ShortlistForm
-from catalogue.models import ConfigurationItem
-from inventory.availability import available_component_quantity
+from catalogue.models import Component, Configuration, ConfigurationItem, specification_fields
 from .models import GameSettingSupport, QuestionnaireGameSetting, QuestionnaireResponse, ShortlistItem
 from .predictor import predict_fps
-
-
-def placeholder(request, *args, **kwargs):
-    return render(request, "recommendations/placeholder.html")
+from .preferences import previous_response
 
 
 @login_required
@@ -38,6 +34,10 @@ def shortlist_save(request):
         return redirect("catalogue:configure")
     form = ShortlistForm(request.POST if request.method == "POST" else None,
                          initial={"name": build.get("name", "My PC")})
+    revision = build_revision(build)
+    if request.method == "POST" and request.POST.get("build_revision") != revision:
+        messages.error(request, "Your current build changed. Review the selections before saving.")
+        return redirect("catalogue:configure")
     if request.method == "POST" and form.is_valid():
         saved = form.save(commit=False)
         saved.customer = customer
@@ -47,7 +47,7 @@ def shortlist_save(request):
         saved.save()
         messages.success(request, "Build saved to your shortlist.")
         return redirect("recommendations:shortlist")
-    return render(request, "recommendations/shortlist_form.html", {"form": form})
+    return render(request, "recommendations/shortlist_form.html", {"form": form, "build_revision": revision})
 
 
 def _shortlist_build(saved):
@@ -98,66 +98,28 @@ def _comparison_selections(request):
     return valid
 
 
-def _customer(request):
-    return Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-
-
-def _previous_response(request, customer):
-    if customer:
-        response = customer.questionnaires.order_by("-created_at", "-pk").first()
-        if response:
-            return response
-    response_id = request.session.get("questionnaire_response_id")
-    if response_id:
-        response = QuestionnaireResponse.objects.filter(pk=response_id).first()
-        if response and (response.customer_id is None or response.customer_id == getattr(customer, "pk", None)):
-            return response
-    return None
-
-
+@require_http_methods(["GET", "POST"])
 def questionnaire(request):
-    customer = _customer(request)
-    previous = _previous_response(request, customer)
-    initial = None
-    if previous and request.method == "GET":
-        initial = {
-            "games": list(previous.game_settings.values_list("game_id", flat=True)),
-            "perf_level": previous.perf_level,
-            "max_spend": previous.max_spend,
+    customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    submitted = request.POST if request.method == "POST" else None
+    previous = previous_response(request, customer) if submitted is None else None
+    form = QuestionnaireForm(submitted, initial_response=previous)
+    reviewing = submitted is not None and submitted.get("action") == "settings"
+    if submitted is not None:
+        missing = {
+            name: field.initial for name, field in form.fields.items()
+            if name.startswith("game_") and name not in submitted
         }
-    form = QuestionnaireForm(
-        request.POST if request.method == "POST" else None,
-        initial=initial,
-        initial_response=previous,
-    )
-    if request.method == "POST":
-        selection = QuestionnaireForm(request.POST, include_settings=False)
-        if not selection.is_valid():
-            form = selection
-        else:
-            draft = request.session.get("questionnaire_draft", {})
-            # Keep edits to removed games so re-adding a game restores its settings.
-            for game_id in GameSettingSupport.objects.values_list("game_id", flat=True).distinct():
-                for suffix in ("fps_goal", "resolution", "graphics_preset"):
-                    key = f"game_{game_id}_{suffix}"
-                    if key in request.POST:
-                        draft[key] = request.POST[key]
-            request.session["questionnaire_draft"] = draft
-            needs_settings = any(name not in request.POST for name in form.fields if name.startswith("game_"))
-            if request.POST.get("action") == "settings" or needs_settings:
-                initial = dict(draft)
-                initial.update({"games": list(selection.cleaned_data["games"].values_list("pk", flat=True)),
-                                "perf_level": selection.cleaned_data["perf_level"],
-                                "max_spend": selection.cleaned_data["max_spend"]})
-                form = QuestionnaireForm(initial=initial, initial_response=previous)
-                return render(request, "recommendations/questionnaire.html", {
-                    "form": form, "game_settings": form.game_settings,
-                })
-    if request.method == "POST" and form.is_valid():
+        if missing:
+            reviewing = True
+            data = submitted.copy()
+            data.update(missing)
+            form = QuestionnaireForm(data)
+    if submitted is not None and not reviewing and form.is_valid():
         with transaction.atomic():
             response = QuestionnaireResponse.objects.create(
                 customer=customer,
-                perf_level=form.cleaned_data["perf_level"],
+                perf_level="balanced",
                 max_spend=form.cleaned_data["max_spend"],
             )
             for game in form.cleaned_data["games"]:
@@ -181,22 +143,21 @@ def questionnaire(request):
 
 
 def recommendations(request):
-    questionnaire = _previous_response(request, _customer(request))
+    questionnaire = previous_response(request)
     if not questionnaire or not questionnaire.game_settings.exists():
         return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False})
     settings = list(questionnaire.game_settings.select_related("game").order_by("game__name"))
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     if fee is None:
         return render(request, "recommendations/results.html", {"questionnaire": questionnaire, "eligible": False, "no_fee": True})
 
     eligible = []
-    unsupported_count = 0
     configurations = Configuration.objects.filter(status=Configuration.Status.PUBLISHED).prefetch_related(
         "items__component"
     ).order_by("name")
     for configuration in configurations:
         items = list(configuration.items.all())
-        if check_configuration_components(item.component for item in items):
+        if check_preset_items(items):
             continue
         available = available_preset_quantity(items)
         if available < 1:
@@ -213,7 +174,6 @@ def recommendations(request):
                 break
             estimates.append({"setting": setting, "fps": fps, "shortfall": max(0, setting.fps_goal - fps)})
         if len(estimates) != len(settings):
-            unsupported_count += 1
             continue
         price = calculate_pc_price(items, fee.fee_amount)
         performance = sum(estimate["fps"] for estimate in estimates)
@@ -228,13 +188,13 @@ def recommendations(request):
         })
 
     affordable = [row for row in eligible if row["price"] <= questionnaire.max_spend]
-    qualifying = [row for row in eligible if row["meets_goals"]]
+    affordable_qualifying = [row for row in affordable if row["meets_goals"]]
     profiles = []
     alternatives = []
     over_budget = None
-    if any(row["meets_goals"] for row in affordable):
+    if affordable_qualifying:
         choices = [
-            ("Lowest cost meeting all goals", min((row for row in affordable if row["meets_goals"]), key=lambda row: row["price"]), "Lowest-priced available build that meets every target."),
+            ("Lowest cost meeting all goals", min(affordable_qualifying, key=lambda row: row["price"]), "Lowest-priced available build that meets every target."),
             ("Best performance within budget", min(affordable, key=lambda row: (-row["performance"], row["price"])), "Highest combined estimated FPS within your budget."),
             ("Best value", min(affordable, key=lambda row: (-row["value"], row["price"])), "Highest combined estimated FPS per dollar within your budget."),
         ]
@@ -245,19 +205,13 @@ def recommendations(request):
                 existing["reasons"].append(reason)
             else:
                 profiles.append({"row": row, "labels": [label], "reasons": [reason]})
-    elif affordable:
+    else:
         alternatives = sorted(
             affordable,
             key=lambda row: (sum(item["shortfall"] for item in row["estimates"]), row["price"]),
         )[:3]
         over_budget = min(
-            (row for row in qualifying if row["price"] > questionnaire.max_spend),
-            key=lambda row: row["price"],
-            default=None,
-        )
-    else:
-        over_budget = min(
-            (row for row in qualifying if row["price"] > questionnaire.max_spend),
+            (row for row in eligible if row["meets_goals"] and row["price"] > questionnaire.max_spend),
             key=lambda row: row["price"],
             default=None,
         )
@@ -271,7 +225,6 @@ def recommendations(request):
             "alternatives": alternatives,
             "over_budget": over_budget,
             "extra_cost": over_budget["price"] - questionnaire.max_spend if over_budget else None,
-            "unsupported_count": unsupported_count,
             "synthetic_estimates": True,
         },
     )
@@ -323,8 +276,10 @@ def compare_remove(request):
 
 def compare_builds(request):
     selected = _comparison_selections(request)
+    questionnaire = previous_response(request)
+    settings = list(questionnaire.game_settings.select_related("game").order_by("game__name")) if questionnaire else []
     builds = []
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    fee = current_assembly_fee()
     for selection in selected:
         kind, item_id = selection.get("kind"), selection.get("id")
         if kind == "preset":
@@ -351,7 +306,7 @@ def compare_builds(request):
             items = _snapshot_items(saved)
         else:
             continue
-        issues = check_configuration_components(item.component for item in items)
+        issues = check_preset_items(items) if kind == "preset" else check_configuration_components(item.component for item in items)
         if kind in ("shortlist", "custom"):
             snapshot = _shortlist_build(saved) if kind == "shortlist" else saved
             missing = {part["component_id"] for part in snapshot.get("components", [])} - {item.component_id for item in items}
@@ -360,10 +315,7 @@ def compare_builds(request):
         price = None
         if fee and not issues:
             price = calculate_pc_price(items, fee.fee_amount)
-        available = min(
-            (available_component_quantity(item.component) // item.quantity for item in items),
-            default=0,
-        ) if items and not issues else 0
+        available = available_preset_quantity(items) if not issues else 0
         by_category = {}
         for item in items:
             label = item.component.get_category_display()
@@ -374,22 +326,20 @@ def compare_builds(request):
                 f"Form factor {component.form_factor}" if component.form_factor else "",
                 f"Tier {component.ml_tier}" if component.ml_tier else "",
             ]
-            specs.extend(f"{key}: {value}" for key, value in component.specs.items())
+            specs.extend(f"{key}: {value}" for key, value in specification_fields(component.specs).items())
             specs = [value for value in specs if value]
             part = f"{component.brand} {component.model} × {item.quantity}"
             if specs:
                 part += f" ({'; '.join(specs)})"
             by_category[label] = f"{by_category[label]}; {part}" if label in by_category else part
-        questionnaire = _previous_response(request, _customer(request))
-        estimates = []
-        if questionnaire:
-            for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
+        estimates = {}
+        if not issues:
+            for setting in settings:
                 supported = GameSettingSupport.objects.filter(
                     game=setting.game, resolution=setting.resolution,
                     graphics_preset=setting.graphics_preset,
                 ).exists()
-                fps = predict_fps(items, setting) if supported and not issues else None
-                estimates.append({"setting": setting, "fps": fps})
+                estimates[setting.pk] = predict_fps(items, setting) if supported else None
         builds.append({
             "kind": kind,
             "id": item_id,
@@ -408,17 +358,16 @@ def compare_builds(request):
         {"label": "PC price", "values": [f"${build['price']}" if build["price"] is not None else "Unavailable" for build in builds]},
         {"label": "Available now", "values": [str(build["available"]) for build in builds]},
     ]
-    questionnaire = _previous_response(request, _customer(request))
     game_rows = []
-    if questionnaire:
-        for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
-            game_rows.append({
-                "label": f"{setting.game.name} · {setting.resolution} · {setting.graphics_preset} · target {setting.fps_goal} FPS (estimate)",
-                "values": [
-                    next((str(row["fps"]) + " FPS" if row["fps"] is not None else "Unavailable" for row in build["estimates"] if row["setting"].pk == setting.pk), "Unavailable")
-                    for build in builds
-                ],
-            })
+    for setting in settings:
+        estimates = [build["estimates"].get(setting.pk) for build in builds]
+        game_rows.append({
+            "setting": setting,
+            "values": [
+                {"fps": fps, "shortfall": max(0, setting.fps_goal - fps)} if fps is not None else None
+                for fps in estimates
+            ],
+        })
     return render(
         request,
         "recommendations/compare.html",

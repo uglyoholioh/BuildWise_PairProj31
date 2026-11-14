@@ -1,6 +1,6 @@
 from django.db.models import Count
 
-from catalogue.compatibility import REQUIRED_CONFIGURATION_CATEGORIES, check_configuration_components
+from catalogue.compatibility import check_configuration_components
 from catalogue.models import Accessory, Component
 from inventory.availability import available_accessory_quantity
 from orders.allocations import approved_pc_parts, component_snapshot
@@ -9,17 +9,19 @@ from orders.models import OrderLine, PurchasedPC, SubstitutionProposal
 
 # Conservative defaults for this optional purchase-history feature.
 MIN_CUSTOMERS = 3
-MIN_MATCHING_CATEGORIES = 5
 MAX_SUGGESTIONS = 3
 
 
-def _core_parts(parts):
-    categories = {}
+def _processor_ids(parts):
+    cpu_ids, gpu_ids = set(), set()
     for part in parts:
-        category = part.get("category")
-        if category in REQUIRED_CONFIGURATION_CATEGORIES and part.get("component_id") and part.get("quantity", 0) > 0:
-            categories.setdefault(category, set()).add(part["component_id"])
-    return categories
+        if not part.get("component_id") or part.get("quantity", 0) < 1:
+            continue
+        if part.get("category") == Component.Category.CPU:
+            cpu_ids.add(part["component_id"])
+        elif part.get("category") == Component.Category.GPU:
+            gpu_ids.add(part["component_id"])
+    return cpu_ids, gpu_ids
 
 
 def accessory_suggestions(items):
@@ -27,8 +29,8 @@ def accessory_suggestions(items):
     items = list(items)
     if check_configuration_components(item.component for item in items):
         return []
-    target = _core_parts(component_snapshot(item.component, item.quantity) for item in items)
-    if len(target) != len(REQUIRED_CONFIGURATION_CATEGORIES):
+    target = _processor_ids(component_snapshot(item.component, item.quantity) for item in items)
+    if not all(target):
         return []
 
     pcs = list(PurchasedPC.objects.filter(
@@ -47,13 +49,7 @@ def accessory_suggestions(items):
         proposals = proposals_by_pc.get(pc.pk, [])
         if not pc.order_line.custom_snapshot.get("components") or any(not proposal.replacement_snapshot for proposal in proposals):
             continue  # Never infer an older purchase from today's catalogue contents.
-        purchased = _core_parts(approved_pc_parts(pc, proposals))
-        if len(purchased) != len(REQUIRED_CONFIGURATION_CATEGORIES):
-            continue
-        if any(purchased[category] != target[category] for category in (Component.Category.CPU, Component.Category.GPU)):
-            continue
-        matches = sum(purchased[category] == target[category] for category in REQUIRED_CONFIGURATION_CATEGORIES)
-        if matches >= MIN_MATCHING_CATEGORIES:
+        if _processor_ids(approved_pc_parts(pc, proposals)) == target:
             matching_orders.add(pc.order_line.order_id)
     if not matching_orders:
         return []

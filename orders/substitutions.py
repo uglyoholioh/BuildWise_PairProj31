@@ -1,5 +1,5 @@
 from catalogue.compatibility import check_configuration_components
-from catalogue.models import Component, ConfigurationItem
+from catalogue.models import Component, ConfigurationItem, specification_fields
 from recommendations.models import GameSettingSupport
 from recommendations.predictor import predict_fps
 from recommendations.ml.schema import MODEL_VERSION, MODEL_METHOD, MODEL_LIMITATIONS
@@ -30,8 +30,8 @@ def specification_rows(original, replacement):
             after = categories.get(after, after)
         if before or after:
             rows.append({"label": label, "original": before, "replacement": after, "changed": before != after})
-    original_specs = original.get("specs", {})
-    replacement_specs = replacement.get("specs", {})
+    original_specs = specification_fields(original.get("specs"))
+    replacement_specs = specification_fields(replacement.get("specs"))
     for label in sorted(original_specs.keys() | replacement_specs.keys()):
         before = original_specs.get(label)
         after = replacement_specs.get(label)
@@ -88,8 +88,8 @@ def substitution_review_snapshot(pc, original, replacement):
     performance["questionnaire_created_at"] = questionnaire.created_at.isoformat()
     original_items = snapshot_items(before)
     replacement_items = snapshot_items(after)
-    original_complete = not check_configuration_components(item.component for item in original_items)
-    replacement_complete = not check_configuration_components(item.component for item in replacement_items)
+    original_complete = not check_configuration_components((item.component for item in original_items), require_active=False)
+    replacement_complete = not check_configuration_components((item.component for item in replacement_items), require_active=False)
     for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
         supported = GameSettingSupport.objects.filter(
             game=setting.game, resolution=setting.resolution, graphics_preset=setting.graphics_preset,

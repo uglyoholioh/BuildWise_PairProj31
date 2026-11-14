@@ -2,19 +2,31 @@
 {% block title %}Configure a PC | BuildWise{% endblock %}
 {% block content %}
 <h1 class="h3">Configure a PC</h1>
-{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
 <p class="text-body-secondary">Choose one active component per category. Your selections are kept in this browser session.</p>
+{% if items or preset_id %}
+  <details class="mb-4">
+    <summary>Start a new build</summary>
+    <form method="post" action="{% url 'catalogue:start_new_build' %}" class="mt-2">
+      {% csrf_token %}
+      <p class="small mb-2">This replaces your current draft. You can save it to your shortlist first.</p>
+      <button class="btn btn-outline-secondary btn-sm" type="submit">Clear draft and start new build</button>
+    </form>
+  </details>
+{% endif %}
 <form method="post" class="card card-body mb-4">
   {% csrf_token %}
+  <input type="hidden" name="build_revision" value="{{ build_revision }}">
   <label class="form-label" for="build-name">Build name</label>
-  <input class="form-control mb-3" id="build-name" name="name" maxlength="160" value="{{ name }}">
+  <input class="form-control mb-3" id="build-name" name="name" maxlength="160" value="{{ name|default_if_none:'' }}">
+  {{ form.name.errors }}
   {% for row in rows %}
   <div class="mb-3">
     <label class="form-label" for="component-{{ row.category }}">{{ row.label }}</label>
     <select class="form-select" id="component-{{ row.category }}" name="component_{{ row.category }}">
       <option value="">Choose {{ row.label|lower }}</option>
-      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if not choice.component.active %} (No longer available){% endif %}{% if choice.issues %} ({{ choice.issues|join:"; " }}){% endif %}</option>{% endfor %}
+      {% for choice in row.choices %}<option value="{{ choice.component.pk }}"{% if choice.component.pk|stringformat:"s" == row.selected %} selected{% endif %}>{{ choice.component.brand }} {{ choice.component.model }} — ${{ choice.component.price }}{% if not choice.component.active %} (No longer available){% endif %}{% if choice.issues %} ({{ choice.issues|join:"; " }}){% endif %}</option>{% endfor %}
     </select>
+    {{ row.errors }}
   </div>
   {% endfor %}
   <p class="small text-body-secondary">Compatible choices appear first. Conflicting choices remain selectable so you can resolve the issue without losing other selections.</p>
@@ -27,7 +39,7 @@
 {% if price != None %}<p><strong>Total PC price: ${{ price }}</strong></p>{% else %}<p class="text-body-secondary">Complete a compatible build to see the full price.</p>{% endif %}
 {% if issues %}<div class="alert alert-warning"><h2 class="h6">Needs attention</h2><ul class="mb-0">{% for issue in issues %}<li>{{ issue }}</li>{% endfor %}</ul></div>{% elif items %}<p>{% if available %}{{ available }} complete build{% if available != 1 %}s{% endif %} available{% else %}Currently out of stock{% endif %}</p>{% endif %}
 {% if estimates %}<h2 class="h5">FPS estimates</h2><ul>{% for row in estimates %}<li>{{ row.setting.game.name }} — target {{ row.setting.fps_goal }} FPS: {% if row.fps %}{{ row.fps }} FPS (estimate){% else %}Unavailable{% endif %}</li>{% endfor %}</ul><p class="small text-body-secondary">Prototype estimates use a model trained on synthetic data, not measured benchmarks.</p>{% endif %}
-{% if complete and available %}<form class="d-inline" method="post">{% csrf_token %}<input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="preset_id" value="{{ preset_id|default:'' }}">{% for row in rows %}<input type="hidden" name="component_{{ row.category }}" value="{{ row.selected }}">{% endfor %}<button class="btn btn-outline-primary" type="submit" name="action" value="complete">Save completed build for comparison</button></form><form class="d-inline" method="post" action="{% url 'orders:cart_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="custom"><button class="btn btn-success" type="submit">Add build to cart</button></form>{% endif %}
-{% if completed_builds %}<h2 class="h5 mt-4">Completed builds</h2>{% for build in completed_builds %}<form class="d-inline-block me-2 mb-2" method="post" action="{% url 'recommendations:compare_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="custom"><input type="hidden" name="item_id" value="{{ build.id }}"><button class="btn btn-outline-secondary" type="submit">Compare {{ build.name }}</button></form>{% endfor %}{% endif %}
+{% if complete and available %}<form class="d-inline" method="post">{% csrf_token %}<input type="hidden" name="build_revision" value="{{ build_revision }}"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="preset_id" value="{{ preset_id|default:'' }}">{% for row in rows %}<input type="hidden" name="component_{{ row.category }}" value="{{ row.selected }}">{% endfor %}<button class="btn btn-outline-primary" type="submit" name="action" value="complete">Save completed build for comparison</button></form><form class="d-inline" method="post" action="{% url 'orders:cart_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="custom"><input type="hidden" name="build_revision" value="{{ build_revision }}"><button class="btn btn-success" type="submit">Add build to cart</button></form>{% endif %}
+{% if completed_builds %}<h2 class="h5 mt-4">Completed builds</h2>{% for build in completed_builds %}<form class="d-inline-block me-2 mb-2" method="post" action="{% url 'recommendations:compare_add' %}">{% csrf_token %}<input type="hidden" name="kind" value="custom"><input type="hidden" name="build_revision" value="{{ build_revision }}"><input type="hidden" name="item_id" value="{{ build.id }}"><button class="btn btn-outline-secondary" type="submit">Compare {{ build.name }}</button></form>{% endfor %}{% endif %}
 {% include "recommendations/accessory_suggestions.html" %}
 {% endblock %}

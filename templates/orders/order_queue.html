@@ -5,9 +5,6 @@
 {% block content %}
 <div class="mb-4"><h1 class="h3 mb-1">Order queue</h1><p class="text-body-secondary mb-0">Paid orders and their confirmed allocations.</p></div>
 
-{% for message in messages %}
-  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
-{% endfor %}
 
 {% for order in orders %}
   <section class="card mb-4">
@@ -27,15 +24,24 @@
             {% if line.kind == "build" %}
               {% for pc in line.pcs.all %}
                 <div class="border rounded p-3 mt-3">
-                  <div class="d-flex flex-wrap justify-content-between gap-2"><strong>PC #{{ pc.pk }} (unit {{ pc.unit_index }}) · {{ pc.status }}</strong>{% if pc.hold_reason %}<span class="text-danger">{{ pc.hold_reason }}</span>{% endif %}</div>
+                  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <strong>PC #{{ pc.pk }} (unit {{ pc.unit_index }})</strong>
+                    {% if pc.pending_substitution %}<span class="badge text-bg-warning">Awaiting customer approval</span>
+                    {% elif pc.status == "quality_passed" %}<span class="badge text-bg-success">Quality checks passed</span>
+                    {% elif pc.status == "on_hold" %}<span class="badge text-bg-warning">On hold</span>
+                    {% elif pc.status == "quality_checking" %}<span class="badge text-bg-secondary">Quality checks in progress</span>
+                    {% elif pc.status == "corrective_work" %}<span class="badge text-bg-warning">Corrective work</span>
+                    {% else %}<span class="badge text-bg-secondary">{{ pc.status|capfirst }}</span>{% endif %}
+                  </div>
+                  {% if pc.hold_reason %}<p class="text-danger mb-2">{{ pc.hold_reason }}</p>{% endif %}
                   {% if pc.allocation_issues %}<ul class="small text-danger mt-2 mb-2">{% for issue in pc.allocation_issues %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
-                  <ul class="small mb-3">
-                    {% for reservation in pc.reservations.all %}
-                      <li>{% if reservation.component %}{{ reservation.component }}{% else %}{{ reservation.accessory }}{% endif %} × {{ reservation.quantity }} · {{ reservation.status }}</li>
-                    {% empty %}<li>No allocations recorded.</li>{% endfor %}
-                  </ul>
                   <div class="d-flex flex-wrap gap-2">
-                    {% if not pc.has_pending_substitution %}
+                    {% if pc.pending_substitution %}
+                      <form method="post" action="{% url 'orders:withdraw_substitution' pc.pending_substitution.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Withdraw proposal</button>
+                      </form>
+                    {% else %}
                     {% if pc.status == "queued" or pc.status == "on_hold" %}
                       <form method="post" action="{% url 'orders:start_order' pc.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit">Start assembly</button></form>
                     {% endif %}
@@ -43,13 +49,14 @@
                       <form class="d-flex gap-2" method="post" action="{% url 'orders:hold_pc' pc.pk %}">{% csrf_token %}<label class="visually-hidden" for="hold-{{ pc.pk }}">Reason PC {{ pc.pk }} is on hold</label><input class="form-control form-control-sm" id="hold-{{ pc.pk }}" name="reason" placeholder="Reason for hold" required><button class="btn btn-outline-danger btn-sm" type="submit">Put on hold</button></form>
                     {% endif %}
                     {% if pc.status == "assembling" %}<form method="post" action="{% url 'orders:start_quality_check' pc.pk %}">{% csrf_token %}<button class="btn btn-outline-primary btn-sm" type="submit">Begin quality checks</button></form>{% endif %}
-                    {% if not pc.has_pending_substitution and pc.status != "quality_passed" and pc.status != "cancelled" %}<a class="btn btn-outline-warning btn-sm" href="{% url 'orders:propose_substitution' pc.pk %}">Propose replacement</a>{% endif %}
+                    {% if pc.status != "quality_passed" and pc.status != "cancelled" %}<a class="btn btn-outline-warning btn-sm" href="{% url 'orders:propose_substitution' pc.pk %}">Propose replacement</a>{% endif %}
                     {% endif %}
                   </div>
-                  {% if not pc.has_pending_substitution %}
+                  {% if not pc.pending_substitution %}
                   {% if pc.status == "quality_checking" or pc.status == "corrective_work" %}
                     <form class="row g-2 mt-2" method="post" action="{% url 'orders:record_quality_check' pc.pk %}">
                       {% csrf_token %}
+                      <input type="hidden" name="revision" value="{{ pc.quality_check_revision }}">
                       <div class="col-md-4"><label class="form-label small" for="check-{{ pc.pk }}">Check</label><select class="form-select form-select-sm" id="check-{{ pc.pk }}" name="checklist_item"><option value="installed_parts">Installed parts</option><option value="startup">Successful startup</option><option value="stability">Basic stability</option></select></div>
                       <div class="col-md-2"><label class="form-label small" for="result-{{ pc.pk }}">Result</label><select class="form-select form-select-sm" id="result-{{ pc.pk }}" name="passed"><option value="yes">Pass</option><option value="no">Fail</option></select></div>
                       <div class="col-md-3"><label class="form-label small" for="fault-{{ pc.pk }}">Faulty component, if known</label><select class="form-select form-select-sm" id="fault-{{ pc.pk }}" name="faulty_component"><option value="">Not applicable</option>{% for reservation in pc.reservations.all %}{% if reservation.component and reservation.status == "reserved" %}<option value="{{ reservation.component_id }}">{{ reservation.component }}</option>{% endif %}{% endfor %}</select></div>
@@ -58,6 +65,14 @@
                     </form>
                   {% endif %}
                   {% endif %}
+                  <details class="mt-2">
+                    <summary>Component allocations</summary>
+                    <ul class="small mb-0 mt-2">
+                      {% for reservation in pc.reservations.all %}
+                        <li>{% if reservation.component %}{{ reservation.component }}{% else %}{{ reservation.accessory }}{% endif %} × {{ reservation.quantity }} · {{ reservation.status }}</li>
+                      {% empty %}<li>No allocations recorded.</li>{% endfor %}
+                    </ul>
+                  </details>
                 </div>
               {% empty %}<p class="small text-body-secondary mb-0">No PC units have been created for this line.</p>{% endfor %}
             {% else %}

@@ -9,9 +9,6 @@
   <p class="text-body-secondary">Record component pairs that cannot be used together. Hardware specification checks run through the shared catalogue checker.</p>
 </div>
 
-{% for message in messages %}
-  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
-{% endfor %}
 
 <div class="card mb-4">
   <div class="card-header"><h2 class="h5 mb-0">Mark components incompatible</h2></div>

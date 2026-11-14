@@ -3,7 +3,6 @@
 {% block content %}
 <h1 class="h3">Customer builds and reviews</h1>
 <p>Reviews from customers who received their PCs. Specifications describe the purchased build and may differ from presets sold today.</p>
-{% for message in messages %}<div class="alert alert-info" role="status">{{ message }}</div>{% endfor %}
 {% if user.is_authenticated %}<p><a href="{% url 'orders:order_list' %}">Open my orders to review a delivered PC</a></p>{% endif %}
 {% for review in page_obj %}
   {% include "support/review_card.html" %}

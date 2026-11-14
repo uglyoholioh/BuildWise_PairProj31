@@ -1,5 +1,5 @@
 <section class="border rounded p-3 my-3" id="substitution-{{ proposal.pk }}" aria-labelledby="substitution-title-{{ proposal.pk }}">
-  <h3 class="h5" id="substitution-title-{{ proposal.pk }}">Substitution #{{ proposal.pk }} · {{ proposal.status }}</h3>
+  <h3 class="h5" id="substitution-title-{{ proposal.pk }}">Substitution #{{ proposal.pk }} · {% if proposal.status == "pending" and order.status == "cancelled" %}cancelled{% else %}{{ proposal.status }}{% endif %}</h3>
   <p>PC #{{ pc.pk }} · Replace one unit of
     {% if proposal.original_snapshot %}<strong>{{ proposal.original_snapshot.brand }} {{ proposal.original_snapshot.model }}</strong>{% else %}component #{{ proposal.original_component_id }} (historical description unavailable){% endif %}
     with {% if proposal.replacement_snapshot %}<strong>{{ proposal.replacement_snapshot.brand }} {{ proposal.replacement_snapshot.model }}</strong>{% else %}component #{{ proposal.replacement_component_id }} (historical description unavailable){% endif %}.
@@ -55,9 +55,13 @@
   {% endif %}
   {% if proposal.fps_note %}<p><strong>Staff performance notes:</strong> {{ proposal.fps_note }}</p>{% endif %}
 
-  <p class="small">Proposed {{ proposal.proposed_at }}.{% if proposal.decided_at %} Your decision was recorded {{ proposal.decided_at }}.{% endif %}</p>
+  <p class="small">Proposed {{ proposal.proposed_at }}.{% if proposal.decided_at %} {% if proposal.status == "withdrawn" %}Staff withdrew the offer on {{ proposal.decided_at }}.{% else %}Your decision was recorded {{ proposal.decided_at }}.{% endif %}{% endif %}</p>
   {% if proposal.status == "superseded" %}
     <p class="text-body-secondary">The component details changed, so this version was replaced by a new proposal. This version was not approved.</p>
+  {% elif proposal.status == "withdrawn" %}
+    <p class="text-body-secondary">Staff withdrew this offer. A new offer will require your approval.</p>
+  {% elif proposal.status == "cancelled" or proposal.status == "pending" and order.status == "cancelled" %}
+    <p class="text-body-secondary">This proposal closed when the order was cancelled.</p>
   {% elif proposal.status == "pending" and can_decide_substitutions and pc.status == "on_hold" %}
     <p>This PC remains on hold until you decide. Declining cancels only PC #{{ pc.pk }} and records a full simulated refund of <strong>${{ line.unit_price_snapshot }}</strong>. Any remaining PCs and accessories continue in the same order.</p>
     <div class="d-flex flex-wrap gap-2">

@@ -29,6 +29,7 @@ class OrderLine(models.Model):
 class PurchasedPC(models.Model):
     order_line = models.ForeignKey(OrderLine, on_delete=models.PROTECT, related_name="pcs")
     unit_index = models.PositiveSmallIntegerField()
+    assembly_started = models.BooleanField(default=False)
     status = models.CharField(max_length=24, default="queued")
     hold_reason = models.TextField(blank=True)
     refund_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))

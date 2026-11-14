@@ -9,9 +9,6 @@
   <p class="text-body-secondary">The fee is added once to each PC build. Earlier values remain in the audit history.</p>
 </div>
 
-{% for message in messages %}
-  <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>
-{% endfor %}
 
 <div class="card"><div class="card-body">
   {% if fee %}<p>Current fee: <strong>${{ fee.fee_amount }}</strong></p>{% else %}<p class="text-body-secondary">No fee has been configured yet.</p>{% endif %}

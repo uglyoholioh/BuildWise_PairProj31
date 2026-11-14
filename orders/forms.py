@@ -42,6 +42,7 @@ class QualityCheckForm(forms.Form):
         ("startup", "Successful startup"),
         ("stability", "Basic stability test"),
     )
+    revision = forms.CharField(widget=forms.HiddenInput)
     checklist_item = forms.ChoiceField(choices=CHECKS)
     passed = forms.ChoiceField(choices=(("yes", "Pass"), ("no", "Fail")))
     faulty_component = forms.ModelChoiceField(

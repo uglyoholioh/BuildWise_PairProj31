@@ -1,3 +1,8 @@
+import json
+import sqlite3
+from hashlib import sha256
+from uuid import uuid4
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.signing import Signer
@@ -9,9 +14,11 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import Customer, StaffAction
-from catalogue.compatibility import check_configuration_components
-from catalogue.models import Accessory, AssemblyFeeSetting, Component, Configuration, ConfigurationItem
-from catalogue.pricing import calculate_pc_price
+from accounts.views import staff_required
+from catalogue.compatibility import check_configuration_components, check_preset_items
+from catalogue.drafts import build_revision
+from catalogue.models import Accessory, Component, Configuration, ConfigurationItem
+from catalogue.pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from inventory.availability import available_accessory_quantity, available_component_quantity
 from inventory.models import Reservation, StockAdjustment
 from .allocations import (
@@ -25,6 +32,9 @@ from .allocations import (
 from .forms import CheckoutForm, DispatchForm, HoldPCForm, QualityCheckForm, SubstitutionProposalForm
 from .models import Order, OrderLine, OrderStatusHistory, PurchasedPC, QualityCheck, Shipment, SubstitutionProposal
 from .substitutions import replacement_details_changed, substitution_review_snapshot
+
+
+MAX_CART_QUANTITY = 20
 
 
 def _build_snapshot(items):
@@ -49,34 +59,38 @@ def _cart_build(row):
             if part.get("component_id") in components and part.get("quantity", 0) > 0
         ]
         configuration = None
-    issues = check_configuration_components(item.component for item in items)
+    issues = check_preset_items(items) if configuration else check_configuration_components(item.component for item in items)
     if row.get("kind") != "preset" and len(items) != len(row.get("custom_snapshot", {}).get("components", [])):
         issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
     return configuration, items, issues
 
 
-def _preset_part_changes(line, items):
-    if line.get("kind") != "preset":
-        return [], []
+def _review_part(part):
+    return {key: value for key, value in part.items() if key != "price"}
+
+
+def _part_changes(line, current):
     previous = line.get("custom_snapshot", {}).get("components")
     if previous is None:
         return [], []
-    current = _build_snapshot(items)["components"]
-    previous_keys = {(part["component_id"], part["quantity"]) for part in previous}
-    current_keys = {(part["component_id"], part["quantity"]) for part in current}
-    removed = [part for part in previous if (part["component_id"], part["quantity"]) not in current_keys]
-    added = [part for part in current if (part["component_id"], part["quantity"]) not in previous_keys]
+    previous_parts = [_review_part(part) for part in previous]
+    current_parts = [_review_part(part) for part in current]
+    removed = [part for part, details in zip(previous, previous_parts) if details not in current_parts]
+    added = [part for part, details in zip(current, current_parts) if details not in previous_parts]
     return removed, added
 
 
 def _checkout_quote(customer, rows):
-    # Bind the submitted form to the exact cart and prices it displayed.
     lines = [
         (row["line"].get("id"), row["line"].get("quantity", 1), str(row["price"]),
-         sorted((item.component_id, item.quantity) for item in row["items"]))
+         row["accessory"].name if row["accessory"] else None,
+         row["accessory"].category if row["accessory"] else None,
+         sorted((_review_part(part) for part in row["parts"]),
+                key=lambda part: part["component_id"]))
         for row in rows
     ]
-    return Signer(salt="orders.checkout").sign_object([customer.pk, lines])
+    payload = json.dumps([customer.pk, lines], sort_keys=True).encode()
+    return Signer(salt="orders.checkout").sign(sha256(payload).hexdigest())
 
 
 @require_http_methods(["GET", "POST"])
@@ -95,38 +109,17 @@ def cart(request):
                     quantity = int(request.POST.get("quantity", ""))
                 except ValueError:
                     quantity = 0
-                if 1 <= quantity <= 20:
+                if 1 <= quantity <= MAX_CART_QUANTITY:
                     line["quantity"] = quantity
                 else:
-                    messages.error(request, "Quantity must be between 1 and 20.")
+                    messages.error(request, f"Quantity must be between 1 and {MAX_CART_QUANTITY}.")
             break
         request.session["cart"] = lines
         return redirect("orders:cart")
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
-    display_lines = []
-    total = 0
-    for line in lines:
-        accessory = None
-        if line.get("kind") == "accessory":
-            accessory = Accessory.objects.filter(pk=line.get("accessory_id"), active=True).first()
-            items, issues = [], [] if accessory else ["This accessory is no longer available."]
-            price = accessory.price if accessory else None
-            stock = available_accessory_quantity(accessory) if accessory else 0
-        else:
-            configuration, items, issues = _cart_build(line)
-            price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-            stock = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items else 0
-        quantity = line.get("quantity", 1)
-        old_price = line.get("quoted_price")
-        changed = price is not None and old_price is not None and str(price) != str(old_price)
-        line["price_changed"] = line.get("price_changed", False) or changed
-        line["quoted_price"] = str(price) if price is not None else None
-        removed, added = _preset_part_changes(line, items) if not issues else ([], [])
-        display_lines.append({"line": line, "items": items, "accessory": accessory, "issues": issues, "price": price, "changed": changed, "stock": stock, "parts_changed": bool(removed or added)})
-        if price is not None:
-            total += price * quantity
-    request.session["cart"] = lines
-    return render(request, "orders/cart.html", {"lines": display_lines, "total": total, "has_cart": bool(lines)})
+    rows, total = _cart_preview(lines, include_stock=True)
+    return render(request, "orders/cart.html", {
+        "lines": rows, "total": total, "has_cart": bool(lines), "max_quantity": MAX_CART_QUANTITY,
+    })
 
 
 @require_POST
@@ -147,6 +140,9 @@ def cart_add(request):
         configuration_id = configuration.pk
     elif kind == "custom":
         build = request.session.get("current_build", {})
+        if request.POST.get("build_revision") != build_revision(build):
+            messages.error(request, "Your draft changed. Review the current build before adding it to your cart.")
+            return redirect("catalogue:configure")
         ids = [part.get("component_id") for part in build.get("components", [])]
         components = Component.objects.in_bulk(ids)
         items = [ConfigurationItem(component=components[part["component_id"]], quantity=part["quantity"]) for part in build.get("components", []) if part.get("component_id") in components]
@@ -156,28 +152,21 @@ def cart_add(request):
         if not available_accessory_quantity(accessory):
             messages.error(request, "This accessory is out of stock.")
             return redirect("catalogue:accessory_list")
-        lines = request.session.get("cart", [])
-        existing = next((line for line in lines if line.get("kind") == "accessory" and line.get("accessory_id") == accessory.pk), None)
-        if existing:
-            existing["quantity"] = min(20, existing.get("quantity", 1) + 1)
-        else:
-            import uuid
-            lines.append({"id": uuid.uuid4().hex, "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk, "name": accessory.name, "quantity": 1})
-        request.session["cart"] = lines
-        messages.success(request, f"{accessory.name} added to your cart.")
-        return redirect("orders:cart")
+        return _add_cart_line(request, {
+            "key": f"accessory:{accessory.pk}", "kind": "accessory", "accessory_id": accessory.pk,
+            "name": accessory.name, "quoted_price": str(accessory.price),
+        })
     else:
         messages.error(request, "Choose a valid build to add to the cart.")
         return redirect("orders:cart")
-    issues = check_configuration_components(item.component for item in items)
+    issues = check_preset_items(items) if kind == "preset" else check_configuration_components(item.component for item in items)
     if kind == "custom" and len(items) != len(build.get("components", [])):
         issues.append("Some selected components are no longer available. Reopen the build to choose replacements.")
-    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0)
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
+    available = available_preset_quantity(items)
+    fee = current_assembly_fee()
     if issues or not items or not available or not fee:
         messages.error(request, "This build is incomplete, unavailable, incompatible, or missing a PC assembly fee.")
         return redirect("orders:cart")
-    quantity = 1
     snapshot = _build_snapshot(items)
     source_preset = configuration if kind == "preset" else Configuration.objects.filter(
         pk=build.get("preset_id"),
@@ -190,16 +179,92 @@ def cart_add(request):
     )
     if kind == "custom":
         key += f":source:{source_preset.pk if source_preset else 'none'}"
+    return _add_cart_line(request, {
+        "key": key, "kind": kind, "configuration_id": configuration_id, "name": name,
+        "custom_snapshot": snapshot, "quoted_price": str(calculate_pc_price(items, fee.fee_amount)),
+    })
+
+
+def _add_cart_line(request, new_line):
     lines = request.session.get("cart", [])
-    existing = next((line for line in lines if line.get("key") == key), None)
-    if existing:
-        existing["quantity"] = min(20, existing.get("quantity", 1) + quantity)
+    for line in lines:
+        if new_line["kind"] == "accessory":
+            matches = line.get("kind") == "accessory" and line.get("accessory_id") == new_line["accessory_id"]
+        else:
+            matches = line.get("key") == new_line["key"]
+        if matches:
+            quantity = line.get("quantity", 1)
+            if quantity >= MAX_CART_QUANTITY:
+                messages.error(request, f"You can add up to {MAX_CART_QUANTITY} units per cart line.")
+                return redirect("orders:cart")
+            line["quantity"] = quantity + 1
+            break
     else:
-        import uuid
-        lines.append({"id": uuid.uuid4().hex, "key": key, "kind": kind, "configuration_id": configuration_id, "name": name, "custom_snapshot": snapshot, "quantity": quantity})
+        lines.append({**new_line, "id": uuid4().hex, "quantity": 1})
     request.session["cart"] = lines
-    messages.success(request, f"{name} added to your cart.")
+    messages.success(request, f"{new_line['name']} added to your cart.")
     return redirect("orders:cart")
+
+
+def _cart_preview(lines, *, include_stock=False):
+    fee = current_assembly_fee()
+    rows = []
+    total = 0
+    for line in lines:
+        configuration = accessory = None
+        if line.get("kind") == "accessory":
+            accessory = Accessory.objects.filter(pk=line.get("accessory_id"), active=True).first()
+            items, issues = [], [] if accessory else ["This accessory is no longer available."]
+            price = accessory.price if accessory else None
+        else:
+            configuration, items, issues = _cart_build(line)
+            if fee is None:
+                issues.append("The PC assembly fee is unavailable.")
+            price = calculate_pc_price(items, fee.fee_amount) if not issues else None
+        parts = _build_snapshot(items)["components"]
+        removed, added = _part_changes(line, parts) if not issues else ([], [])
+        if price is not None:
+            total += price * line.get("quantity", 1)
+        row = {
+            "line": line, "items": items, "accessory": accessory, "configuration": configuration,
+            "issues": issues, "price": price, "removed": removed, "added": added, "parts": parts,
+            "changed": line.get("price_changed", False)
+                       or (price is not None and line.get("quoted_price") not in (None, str(price))),
+            "parts_changed": bool(removed or added),
+        }
+        if include_stock:
+            row["stock"] = 0 if issues else (
+                available_accessory_quantity(accessory) if accessory else available_preset_quantity(items)
+            )
+        rows.append(row)
+    return rows, total
+
+
+def _checkout_page(request, form, rows, total):
+    return render(request, "orders/checkout.html", {
+        "form": form, "lines": rows, "total": total,
+        "invalid": any(row["issues"] for row in rows),
+    })
+
+
+def _check_checkout_stock(rows):
+    components, accessories = {}, {}
+    for row in rows:
+        quantity = row["line"].get("quantity", 1)
+        if row["accessory"]:
+            accessory = row["accessory"]
+            accessories[accessory] = accessories.get(accessory, 0) + quantity
+        else:
+            for item in row["items"]:
+                component = item.component
+                components[component] = components.get(component, 0) + item.quantity * quantity
+    for component, quantity in components.items():
+        if available_component_quantity(component) < quantity:
+            return f"Not enough stock for {component}."
+    for accessory, quantity in accessories.items():
+        if available_accessory_quantity(accessory) < quantity:
+            return f"Not enough stock for {accessory}."
+    return None
 
 
 @login_required
@@ -210,169 +275,98 @@ def checkout(request):
     if not lines:
         messages.error(request, "Your cart is empty.")
         return redirect("orders:cart")
-    fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
     form = CheckoutForm(request.POST if request.method == "POST" else None, instance=customer)
-    preview = []
-    total = 0
-    for line in lines:
-        accessory = None
-        if line.get("kind") == "accessory":
-            accessory = Accessory.objects.filter(pk=line.get("accessory_id"), active=True).first()
-            items, issues = [], [] if accessory else ["An accessory in your cart is no longer available."]
-            price = accessory.price if accessory else None
-        else:
-            configuration, items, issues = _cart_build(line)
-            price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-        if price is not None:
-            total += price * line.get("quantity", 1)
-        price_changed = price is not None and line.get("quoted_price") not in (None, str(price))
-        line["price_changed"] = line.get("price_changed", False) or price_changed
-        removed, added = _preset_part_changes(line, items) if not issues else ([], [])
-        preview.append({"line": line, "items": items, "accessory": accessory, "configuration": configuration if line.get("kind") != "accessory" else None, "issues": issues, "price": price, "changed": line["price_changed"], "removed": removed, "added": added})
-    invalid = any(row["issues"] or row["price"] is None or (row["line"].get("kind") != "accessory" and not fee) for row in preview)
-    quote = _checkout_quote(customer, preview)
-    form.initial["quote"] = quote
-    if request.method == "POST" and form.is_valid() and not invalid:
-        prices_changed = any(row["changed"] for row in preview)
-        parts_changed = any(row["removed"] or row["added"] for row in preview)
-        if (prices_changed or parts_changed) and not form.cleaned_data["confirm_prices"]:
-            for row in preview:
-                if row["changed"] and row["price"] is not None:
-                    row["line"]["quoted_price"] = str(row["price"])
-                    row["line"]["price_changed"] = True
-            request.session["cart"] = lines
-            if parts_changed:
-                messages.warning(request, "Preset components changed. Review the updated order and confirm before placing your order.")
-            else:
-                messages.warning(request, "Prices changed. Review the updated total and confirm before placing your order.")
-            return redirect("orders:cart")
-        try:
-            with transaction.atomic():
-                # Cart line IDs are generated by the server and survive simultaneous submits.
-                checkout_reference = lines[0].get("id")
-                existing_order = None
-                if checkout_reference:
-                    existing_order = Order.objects.filter(
-                        customer=customer, checkout_reference=checkout_reference,
-                    ).first()
+    if not form.is_bound or not form.is_valid():
+        rows, total = _cart_preview(lines)
+        form.initial["quote"] = _checkout_quote(customer, rows)
+        return _checkout_page(request, form, rows, total)
+
+    try:
+        with transaction.atomic():
+            checkout_reference = lines[0].get("id")
+            if checkout_reference:
+                existing_order = Order.objects.filter(customer=customer, checkout_reference=checkout_reference).first()
                 if existing_order:
                     request.session["cart"] = []
                     request.session.pop("current_build", None)
                     return redirect("orders:order_detail", pk=existing_order.pk)
-                if form.cleaned_data["quote"] != quote:
-                    data = request.POST.copy()
-                    data["quote"] = quote
-                    data.pop("confirm_prices", None)
-                    form = CheckoutForm(data, instance=customer)
-                    form.add_error(None, "Prices or items changed. Review the updated total before placing your order.")
-                    return render(request, "orders/checkout.html", {
-                        "form": form, "lines": preview, "total": total, "invalid": invalid,
-                    })
-                current_fee = AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
-                component_ids = sorted({item.component_id for row in preview for item in row["items"]})
-                locked = {item.pk: item for item in Component.objects.select_for_update().filter(pk__in=component_ids, active=True)}
-                if len(locked) != len(component_ids):
-                    raise ValueError("A component in your cart is no longer available.")
-                accessory_ids = sorted({row["accessory"].pk for row in preview if row["accessory"]})
-                locked_accessories = {item.pk: item for item in Accessory.objects.select_for_update().filter(pk__in=accessory_ids, active=True)}
-                if len(locked_accessories) != len(accessory_ids):
-                    raise ValueError("An accessory in your cart is no longer available.")
-                requirements = {"component": {}, "accessory": {}}
-                for row in preview:
-                    if row["issues"]:
-                        raise ValueError("An item in your cart is no longer available or compatible.")
-                    line = row["line"]
-                    if line.get("kind") == "accessory":
-                        accessory = locked_accessories[row["accessory"].pk]
-                        current_price = accessory.price
-                        requirements["accessory"][accessory.pk] = requirements["accessory"].get(accessory.pk, 0) + line.get("quantity", 1)
-                        row["accessory"] = accessory
-                    else:
-                        if line["kind"] == "preset":
-                            _, current_items, current_issues = _cart_build(line)
-                            if current_issues or sorted((item.component_id, item.quantity) for item in current_items) != sorted(
-                                (item.component_id, item.quantity) for item in row["items"]
-                            ):
-                                raise ValueError("A preset changed during checkout. Review the updated cart.")
-                        for item in row["items"]:
-                            item.component = locked[item.component_id]
-                            requirements["component"][item.component_id] = requirements["component"].get(item.component_id, 0) + item.quantity * line.get("quantity", 1)
-                        current_issues = check_configuration_components(item.component for item in row["items"])
-                        if current_issues:
-                            raise ValueError("A build in your cart is no longer compatible.")
-                        if current_fee is None:
-                            raise ValueError("The PC assembly fee is unavailable. Review the updated cart.")
-                        current_price = calculate_pc_price(row["items"], current_fee.fee_amount)
-                    if str(current_price) != str(row["price"]):
-                        row["line"]["quoted_price"] = str(current_price)
-                        row["line"]["price_changed"] = True
-                        request.session["cart"] = lines
-                        raise ValueError("Prices changed during checkout. Review the updated cart and confirm again.")
-                    row["price"] = current_price
-                total = sum(row["price"] * row["line"].get("quantity", 1) for row in preview)
-                for component_id, quantity in requirements["component"].items():
-                    if available_component_quantity(locked[component_id]) < quantity:
-                        raise ValueError(f"Not enough stock for {locked[component_id]}.")
-                for accessory_id, quantity in requirements["accessory"].items():
-                    if available_accessory_quantity(locked_accessories[accessory_id]) < quantity:
-                        raise ValueError(f"Not enough stock for {locked_accessories[accessory_id]}.")
-                # A declined simulation must not save customer details or any purchase records.
-                if form.cleaned_data["simulate_payment_failure"]:
-                    form.add_error(None, "Simulated payment was declined. Your cart is unchanged and no order was placed. "
-                                   "Uncheck 'Simulate payment decline' to retry.")
-                    return render(request, "orders/checkout.html", {
-                        "form": form, "lines": preview, "total": total, "invalid": invalid,
-                    })
-                customer.name = form.cleaned_data["name"]
-                customer.delivery_address = form.cleaned_data["delivery_address"]
-                customer.save(update_fields=("name", "delivery_address"))
-                order = Order.objects.create(
-                    checkout_reference=checkout_reference,
-                    customer=customer,
-                    payment_status="paid",
-                    total_snapshot=total,
-                    delivery_name=customer.name,
-                    delivery_address=customer.delivery_address,
+
+            rows, total = _cart_preview(lines)
+            quote = _checkout_quote(customer, rows)
+            if form.cleaned_data["quote"] != quote:
+                data = request.POST.copy()
+                data["quote"] = quote
+                data.pop("confirm_prices", None)
+                form = CheckoutForm(data, instance=customer)
+                form.add_error(None, "Prices or items changed. Review the updated total before placing your order.")
+                return _checkout_page(request, form, rows, total)
+            if any(row["issues"] for row in rows):
+                return _checkout_page(request, form, rows, total)
+            if not form.cleaned_data["confirm_prices"]:
+                if any(row["parts_changed"] for row in rows):
+                    form.add_error(None, "Build components changed. Review the updated parts and confirm before placing your order.")
+                elif any(row["changed"] for row in rows):
+                    form.add_error(None, "Prices changed. Review the updated total and confirm before placing your order.")
+                if form.errors:
+                    return _checkout_page(request, form, rows, total)
+
+            stock_error = _check_checkout_stock(rows)
+            if stock_error:
+                messages.error(request, stock_error)
+                return redirect("orders:cart")
+            if form.cleaned_data["simulate_payment_failure"]:
+                form.add_error(None, "Simulated payment was declined. Your cart is unchanged and no order was placed. "
+                               "Uncheck 'Simulate payment decline' to retry.")
+                return _checkout_page(request, form, rows, total)
+            customer.name = form.cleaned_data["name"]
+            customer.delivery_address = form.cleaned_data["delivery_address"]
+            customer.save(update_fields=("name", "delivery_address"))
+            order = Order.objects.create(
+                checkout_reference=checkout_reference,
+                customer=customer,
+                payment_status="paid",
+                total_snapshot=total,
+                delivery_name=customer.name,
+                delivery_address=customer.delivery_address,
+            )
+            OrderStatusHistory.objects.create(order=order, to_status="placed", note="Simulated payment succeeded and stock was reserved.")
+            for row in rows:
+                line = row["line"]
+                is_accessory = line.get("kind") == "accessory"
+                if is_accessory:
+                    snapshot = {"accessory": {
+                        "name": row["accessory"].name,
+                        "category": row["accessory"].category,
+                    }}
+                else:
+                    snapshot = {"components": row["parts"]}
+                    for field in ("source_preset_id", "source_preset_name", "customised_from_preset"):
+                        if field in line.get("custom_snapshot", {}):
+                            snapshot[field] = line["custom_snapshot"][field]
+                order_line = OrderLine.objects.create(
+                    order=order, kind="accessory" if is_accessory else "build",
+                    name=row["accessory"].name if is_accessory else line["name"],
+                    quantity=line.get("quantity", 1), unit_price_snapshot=row["price"],
+                    configuration=row.get("configuration"), accessory=row.get("accessory"),
+                    custom_snapshot=snapshot,
                 )
-                OrderStatusHistory.objects.create(order=order, to_status="placed", note="Simulated payment succeeded and stock was reserved.")
-                for row in preview:
-                    line = row["line"]
-                    is_accessory = line.get("kind") == "accessory"
-                    if is_accessory:
-                        snapshot = {"accessory": {
-                            "name": row["accessory"].name,
-                            "category": row["accessory"].category,
-                        }}
-                    else:
-                        snapshot = _build_snapshot(row["items"])
-                        for field in ("source_preset_id", "source_preset_name", "customised_from_preset"):
-                            if field in line.get("custom_snapshot", {}):
-                                snapshot[field] = line["custom_snapshot"][field]
-                    order_line = OrderLine.objects.create(
-                        order=order, kind="accessory" if is_accessory else "build",
-                        name=row["accessory"].name if is_accessory else line["name"],
-                        quantity=line.get("quantity", 1), unit_price_snapshot=row["price"],
-                        configuration=row.get("configuration"), accessory=row.get("accessory"),
-                        custom_snapshot=snapshot,
-                    )
-                    if line.get("kind") == "accessory":
-                        Reservation.objects.create(accessory=row["accessory"], order_line=order_line, quantity=order_line.quantity)
-                    else:
-                        for unit_index in range(1, order_line.quantity + 1):
-                            pc = PurchasedPC.objects.create(order_line=order_line, unit_index=unit_index)
-                            for item in row["items"]:
-                                Reservation.objects.create(component=locked[item.component_id], purchased_pc=pc, quantity=item.quantity)
-        except OperationalError:
-            messages.error(request, "Inventory is being updated. Your cart is unchanged; please try checkout again.")
-            return redirect("orders:cart")
-        except ValueError as error:
-            messages.error(request, str(error))
-            return redirect("orders:cart")
-        request.session["cart"] = []
-        request.session.pop("current_build", None)
-        messages.success(request, "Payment simulated successfully. Your order has been placed.")
-        return redirect("orders:order_detail", pk=order.pk)
-    return render(request, "orders/checkout.html", {"form": form, "lines": preview, "total": total, "invalid": invalid})
+                if line.get("kind") == "accessory":
+                    Reservation.objects.create(accessory=row["accessory"], order_line=order_line, quantity=order_line.quantity)
+                else:
+                    for unit_index in range(1, order_line.quantity + 1):
+                        pc = PurchasedPC.objects.create(order_line=order_line, unit_index=unit_index)
+                        for item in row["items"]:
+                            Reservation.objects.create(component=item.component, purchased_pc=pc, quantity=item.quantity)
+    except OperationalError as error:
+        code = getattr(error.__cause__, "sqlite_errorcode", 0)
+        if (code & 0xFF) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+        messages.error(request, "Inventory is being updated. Your cart is unchanged; please try checkout again.")
+        return redirect("orders:cart")
+    request.session["cart"] = []
+    request.session.pop("current_build", None)
+    messages.success(request, "Payment simulated successfully. Your order has been placed.")
+    return redirect("orders:order_detail", pk=order.pk)
 
 
 @login_required
@@ -405,9 +399,9 @@ def order_list(request):
     return render(request, "orders/order_list.html", {"orders": orders})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def propose_substitution(request, pk):
-    order_id = _order_id_for_pc(pk)
     pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
     order = pc.order_line.order
     form = SubstitutionProposalForm(
@@ -415,8 +409,8 @@ def propose_substitution(request, pk):
     )
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
-            order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-            pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+            pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+            order = pc.order_line.order
             if (
                 order.payment_status != "paid"
                 or order.status in ("cancelled", "delivered", "dispatched", "packing")
@@ -427,7 +421,7 @@ def propose_substitution(request, pk):
             else:
                 original = get_object_or_404(Component, pk=form.cleaned_data["original_component"].pk)
                 replacement = get_object_or_404(
-                    Component.objects.select_for_update(), pk=form.cleaned_data["replacement_component"].pk
+                    Component.objects, pk=form.cleaned_data["replacement_component"].pk
                 )
                 problems = substitution_issues(pc, original, replacement)
                 if problems:
@@ -463,19 +457,46 @@ def propose_substitution(request, pk):
     return render(request, "orders/substitution_form.html", {"form": form, "pc": pc, "order": order})
 
 
+@staff_required
+@require_POST
+def withdraw_substitution(request, pk):
+    with transaction.atomic():
+        proposal = get_object_or_404(
+            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"), pk=pk,
+        )
+        pc = proposal.purchased_pc
+        order = pc.order_line.order
+        if (
+            proposal.status != "pending" or pc.status != "on_hold"
+            or order.status not in ("placed", "in_progress") or order.payment_status != "paid"
+        ):
+            messages.error(request, "This proposal is no longer pending.")
+        else:
+            proposal.status = "withdrawn"
+            proposal.decided_at = timezone.now()
+            employee = request.user.employee_profile
+            proposal.decided_by = f"staff:{employee.pk}"
+            proposal.save(update_fields=("status", "decided_at", "decided_by"))
+            pc.hold_reason = "The replacement offer was withdrawn. Staff can propose another part."
+            pc.save(update_fields=("hold_reason",))
+            OrderStatusHistory.objects.create(
+                order=order, from_status=order.status, to_status=order.status,
+                note=f"Staff withdrew substitution #{proposal.pk} for PC #{pc.pk}.", employee=employee,
+            )
+            messages.success(request, "Replacement offer withdrawn.")
+    return redirect("orders:order_queue")
+
+
 @login_required
 @require_POST
 def decide_substitution(request, pk):
     with transaction.atomic():
         proposal = get_object_or_404(
-            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"), pk=pk
+            SubstitutionProposal.objects.select_related("purchased_pc__order_line__order"),
+            pk=pk, purchased_pc__order_line__order__customer__user=request.user,
         )
-        order_id = proposal.purchased_pc.order_line.order_id
-        order = get_object_or_404(
-            Order.objects.select_for_update(), pk=order_id, customer__user=request.user
-        )
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=proposal.purchased_pc_id)
-        proposal = get_object_or_404(SubstitutionProposal.objects.select_for_update(), pk=pk)
+        pc = proposal.purchased_pc
+        order = pc.order_line.order
         decision = request.POST.get("decision")
         if (
             proposal.status != "pending"
@@ -486,7 +507,7 @@ def decide_substitution(request, pk):
             messages.error(request, "This substitution is no longer awaiting a decision.")
         elif decision == "accept":
             replacement = get_object_or_404(
-                Component.objects.select_for_update(), pk=proposal.replacement_component_id
+                Component.objects, pk=proposal.replacement_component_id
             )
             problems = substitution_issues(pc, proposal.original_component, replacement)
             if problems:
@@ -542,10 +563,8 @@ def decide_substitution(request, pk):
                 if pc.status == "on_hold":
                     if pc.quality_checks.exists():
                         pc.status = "corrective_work"
-                    elif order.status == "placed":
-                        pc.status = "queued"
                     else:
-                        pc.status = "assembling"
+                        pc.status = "assembling" if pc.assembly_started else "queued"
                 pc.hold_reason = ""
                 pc.save(update_fields=("status", "hold_reason"))
                 OrderStatusHistory.objects.create(
@@ -554,12 +573,10 @@ def decide_substitution(request, pk):
                 )
                 messages.success(request, "Substitution accepted. The confirmed order price is unchanged.")
         elif decision == "decline":
-            for reservation in Reservation.objects.select_for_update().filter(
-                purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
-            ):
-                if proposal.previous_pc_status == "queued":
-                    reservation.status = Reservation.Status.RELEASED
-                    reservation.save(update_fields=("status",))
+            if not pc.assembly_started:
+                pc.reservations.filter(status=Reservation.Status.RESERVED).update(
+                    status=Reservation.Status.RELEASED,
+                )
             proposal.status = "declined"
             proposal.decided_at = timezone.now()
             proposal.decided_by = f"customer:{request.user.pk}"
@@ -582,9 +599,25 @@ def decide_substitution(request, pk):
             messages.success(request, "This PC was cancelled and its full PC price was recorded for refund.")
         else:
             messages.error(request, "Choose accept or decline.")
-    return redirect("orders:order_detail", pk=order_id)
+    return redirect("orders:order_detail", pk=order.pk)
 
 
+def _pcs_ready(lines):
+    for line in lines:
+        if line.kind == "build":
+            pcs = list(line.pcs.all())
+            if len(pcs) != line.quantity or any(pc.status not in ("quality_passed", "cancelled") for pc in pcs):
+                return False
+    return True
+
+
+def quality_check_revision(pc):
+    check = pc.quality_checks.order_by("-pk").values_list("pk", flat=True).first()
+    approval = pc.substitutions.filter(status="accepted").order_by("-decided_at", "-pk").values_list("pk", flat=True).first()
+    return f"{check or 0}:{approval or 0}"
+
+
+@staff_required
 def order_queue(request):
     orders = list(
         Order.objects.filter(payment_status="paid")
@@ -602,36 +635,28 @@ def order_queue(request):
     )
     for order in orders:
         lines = list(order.lines.all())
-        order.is_accessory_only = bool(lines) and all(line.kind == "accessory" for line in lines)
-        order.accessory_allocation_issues = accessory_allocation_issues(order)
+        order.accessory_allocation_issues = (
+            accessory_allocation_issues(order) if order.status in ("placed", "in_progress", "packing") else []
+        )
         for line in lines:
             for purchased_pc in line.pcs.all():
                 purchased_pc.allocation_issues = (
-                    [] if purchased_pc.status == "quality_passed"
+                    [] if purchased_pc.status in ("quality_passed", "cancelled")
                     else purchased_pc_allocation_issues(purchased_pc)
                 )
-                purchased_pc.has_pending_substitution = purchased_pc.substitutions.filter(status="pending").exists()
-        pcs = [pc for line in lines for pc in line.pcs.all()]
-        order.pcs_ready = (
-            all(line.kind != "build" or line.pcs.count() == line.quantity for line in lines)
-            and all(pc.status in ("quality_passed", "cancelled") for pc in pcs)
-        )
+                purchased_pc.pending_substitution = purchased_pc.substitutions.filter(status="pending").first()
+                if purchased_pc.status in ("quality_checking", "corrective_work") and not purchased_pc.pending_substitution:
+                    purchased_pc.quality_check_revision = quality_check_revision(purchased_pc)
+        order.pcs_ready = _pcs_ready(lines)
         order.can_start_packing = (
             order.payment_status == "paid"
             and order.status in ("placed", "in_progress")
             and bool(lines)
             and order.pcs_ready
-            and not accessory_allocation_issues(order)
+            and not order.accessory_allocation_issues
         )
         order.can_dispatch = order.payment_status == "paid" and order.status == "packing" and order.pcs_ready and not order.accessory_allocation_issues
     return render(request, "orders/order_queue.html", {"orders": orders})
-
-
-def _order_id_for_pc(pk):
-    order_id = PurchasedPC.objects.filter(pk=pk).values_list("order_line__order_id", flat=True).first()
-    if order_id is None:
-        raise Http404
-    return order_id
 
 
 @login_required
@@ -639,22 +664,25 @@ def _order_id_for_pc(pk):
 def order_cancel(request, pk):
     with transaction.atomic():
         order = get_object_or_404(
-            Order.objects.select_for_update(), pk=pk, customer__user=request.user
+            Order.objects, pk=pk, customer__user=request.user
         )
         if order.status != "placed" or order.payment_status != "paid":
             messages.error(request, "This order can no longer be cancelled.")
         else:
-            reservations = Reservation.objects.select_for_update().filter(
+            reservations = Reservation.objects.filter(
                 Q(order_line__order=order) | Q(purchased_pc__order_line__order=order),
                 status=Reservation.Status.RESERVED,
             )
             for reservation in reservations:
                 reservation.status = Reservation.Status.RELEASED
                 reservation.save(update_fields=("status",))
-            for pc in PurchasedPC.objects.select_for_update().filter(order_line__order=order):
+            for pc in PurchasedPC.objects.filter(order_line__order=order):
                 pc.status = "cancelled"
                 pc.refund_amount = pc.order_line.unit_price_snapshot
                 pc.save(update_fields=("status", "refund_amount"))
+            SubstitutionProposal.objects.filter(
+                purchased_pc__order_line__order=order, status="pending",
+            ).update(status="cancelled")
             order.status = "cancelled"
             order.payment_status = "refunded"
             order.save(update_fields=("status", "payment_status"))
@@ -668,14 +696,12 @@ def order_cancel(request, pk):
     return redirect("orders:order_list")
 
 
+@staff_required
 @require_POST
 def start_order(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(
-            PurchasedPC.objects.select_for_update().select_related("order_line"), pk=pk
-        )
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if order.payment_status != "paid" or order.status in ("cancelled", "delivered"):
             messages.error(request, "This order cannot be started.")
         elif pc.substitutions.filter(status="pending").exists():
@@ -697,8 +723,9 @@ def start_order(request, pk):
                 messages.error(request, f"PC #{pc.pk} was put on hold: {pc.hold_reason}")
             else:
                 pc.status = "assembling"
+                pc.assembly_started = True
                 pc.hold_reason = ""
-                pc.save(update_fields=("status", "hold_reason"))
+                pc.save(update_fields=("status", "assembly_started", "hold_reason"))
                 if order.status == "placed":
                     order.status = "in_progress"
                     order.save(update_fields=("status",))
@@ -719,12 +746,12 @@ def start_order(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def start_quality_check(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if order.status in ("cancelled", "delivered") or pc.status != "assembling" or pc.substitutions.filter(status="pending").exists():
             messages.error(request, "This PC is not ready for quality checks.")
         else:
@@ -740,15 +767,17 @@ def start_quality_check(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def record_quality_check(request, pk):
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         form = QualityCheckForm(request.POST, purchased_pc=pc)
         if not form.is_valid():
             messages.error(request, "Choose a check, and include a reason when it fails.")
+        elif form.cleaned_data["revision"] != quality_check_revision(pc):
+            messages.error(request, "A newer result or replacement was recorded. Review the PC before submitting another check.")
         elif pc.substitutions.filter(status="pending").exists() or purchased_pc_allocation_issues(pc):
             messages.error(request, "Resolve pending approval and missing allocations before quality checks.")
         elif order.status in ("cancelled", "delivered") or pc.status not in (
@@ -771,7 +800,7 @@ def record_quality_check(request, pk):
                 pc.status = "on_hold"
                 pc.hold_reason = note
                 if faulty:
-                    reservations = Reservation.objects.select_for_update().filter(
+                    reservations = Reservation.objects.filter(
                         purchased_pc=pc,
                         component=faulty,
                         status=Reservation.Status.RESERVED,
@@ -795,7 +824,7 @@ def record_quality_check(request, pk):
                         )
                         if available > 0:
                             pc.status = "corrective_work"
-                            pc.hold_reason = "A working replacement is reserved; retest this check."
+                            pc.hold_reason = "A working replacement is reserved. Repeat all quality checks."
                         else:
                             pc.hold_reason = f"{note} No working unit is available; use a US-A11 substitution."
                 pc.save(update_fields=("status", "hold_reason"))
@@ -809,6 +838,9 @@ def record_quality_check(request, pk):
             else:
                 latest = {}
                 checks = pc.quality_checks.all()
+                last_failure = checks.filter(passed=False).order_by("-pk").first()
+                if last_failure:
+                    checks = checks.filter(pk__gt=last_failure.pk)
                 last_approval = pc.substitutions.filter(status="accepted").order_by("-decided_at", "-pk").first()
                 if last_approval:
                     checks = checks.filter(created_at__gt=last_approval.decided_at)
@@ -816,7 +848,7 @@ def record_quality_check(request, pk):
                     latest[row.checklist_item] = row.passed
                 required = {key for key, _ in QualityCheckForm.CHECKS}
                 if required <= latest.keys() and all(latest[key] for key in required):
-                    for reservation in Reservation.objects.select_for_update().filter(
+                    for reservation in Reservation.objects.filter(
                         purchased_pc=pc, status=Reservation.Status.RESERVED, component__isnull=False
                     ).select_related("component"):
                         StockAdjustment.objects.create(
@@ -840,23 +872,24 @@ def record_quality_check(request, pk):
                     messages.success(request, f"PC #{pc.pk} passed quality checks.")
                 elif pc.status == "corrective_work":
                     pc.status = "quality_checking"
-                    pc.save(update_fields=("status",))
+                    pc.hold_reason = ""
+                    pc.save(update_fields=("status", "hold_reason"))
                     messages.success(request, "Check recorded; continue the remaining tests.")
                 else:
                     messages.success(request, "Check recorded.")
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def hold_pc(request, pk):
     form = HoldPCForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Enter a reason before placing the PC on hold.")
         return redirect("orders:order_queue")
-    order_id = _order_id_for_pc(pk)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
-        pc = get_object_or_404(PurchasedPC.objects.select_for_update(), pk=pk)
+        pc = get_object_or_404(PurchasedPC.objects.select_related("order_line__order"), pk=pk)
+        order = pc.order_line.order
         if (
             order.payment_status != "paid"
             or order.status in ("cancelled", "delivered")
@@ -877,16 +910,16 @@ def hold_pc(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def start_packing(request, pk):
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
-        lines = list(order.lines.all())
-        pcs = list(PurchasedPC.objects.filter(order_line__order=order))
+        order = get_object_or_404(Order, pk=pk)
+        lines = list(order.lines.prefetch_related("pcs"))
         eligible_status = order.status in ("placed", "in_progress")
         if order.payment_status != "paid" or not lines:
             messages.error(request, "Only paid orders can enter the packing queue.")
-        elif eligible_status and all(line.kind != "build" or line.pcs.count() == line.quantity for line in lines) and all(pc.status in ("quality_passed", "cancelled") for pc in pcs):
+        elif eligible_status and _pcs_ready(lines):
             issues = accessory_allocation_issues(order)
             if issues:
                 messages.error(request, "Cannot start packing: " + " ".join(issues))
@@ -898,7 +931,7 @@ def start_packing(request, pk):
                     order=order,
                     from_status=previous_status,
                     to_status="packing",
-                    note="Accessory-only order packing started.",
+                    note="Order packing started.",
                     employee=request.user.employee_profile,
                 )
                 StaffAction.objects.create(
@@ -913,25 +946,25 @@ def start_packing(request, pk):
     return redirect("orders:order_queue")
 
 
+@staff_required
 @require_POST
 def dispatch_order(request, pk):
     form = DispatchForm(request.POST)
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
-        lines = list(order.lines.all())
-        pcs = list(PurchasedPC.objects.select_for_update().filter(order_line__order=order))
+        order = get_object_or_404(Order, pk=pk)
+        lines = list(order.lines.prefetch_related("pcs"))
         if not form.is_valid():
             messages.error(request, "Enter valid courier and tracking details.")
         elif order.payment_status != "paid" or order.status != "packing" or not lines:
             messages.error(request, "This order is not ready for dispatch.")
-        elif any(line.kind == "build" and line.pcs.count() != line.quantity for line in lines) or any(pc.status not in ("quality_passed", "cancelled") for pc in pcs):
+        elif not _pcs_ready(lines):
             messages.error(request, "Every remaining PC must pass quality checks before dispatch.")
         else:
             issues = accessory_allocation_issues(order)
             if issues:
                 messages.error(request, "Cannot dispatch: " + " ".join(issues))
             else:
-                reservations = Reservation.objects.select_for_update().filter(
+                reservations = Reservation.objects.filter(
                     order_line__order=order,
                     status=Reservation.Status.RESERVED,
                     accessory__isnull=False,
@@ -974,7 +1007,7 @@ def dispatch_order(request, pk):
 
 
 def _confirm_delivery(request, order, confirmed_by, employee=None):
-    shipment = get_object_or_404(Shipment.objects.select_for_update(), order=order)
+    shipment = get_object_or_404(Shipment, order=order)
     if shipment.status == "dispatched":
         shipment.status = "delivered"
         shipment.delivered_at = timezone.now()
@@ -1001,10 +1034,11 @@ def _confirm_delivery(request, order, confirmed_by, employee=None):
         messages.info(request, "This delivery has already been confirmed or is not dispatched.")
 
 
+@staff_required
 @require_POST
 def staff_confirm_delivery(request, pk):
     with transaction.atomic():
-        order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+        order = get_object_or_404(Order, pk=pk)
         employee = request.user.employee_profile
         _confirm_delivery(request, order, f"staff:{employee.pk}", employee)
     return redirect("orders:order_queue")
@@ -1015,7 +1049,7 @@ def staff_confirm_delivery(request, pk):
 def confirm_receipt(request, pk):
     with transaction.atomic():
         order = get_object_or_404(
-            Order.objects.select_for_update(), pk=pk, customer__user=request.user
+            Order.objects, pk=pk, customer__user=request.user
         )
         _confirm_delivery(request, order, f"customer:{request.user.pk}")
     return redirect("orders:order_detail", pk=pk)

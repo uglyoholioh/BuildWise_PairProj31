@@ -1,20 +1,17 @@
 from django.contrib import messages
 from django.db import transaction
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from accounts.models import StaffAction
+from accounts.views import staff_required
 from catalogue.models import Accessory, Component
 from .availability import stock_position
 from .forms import CancelledStockInspectionForm, StockAdjustmentForm
 from .models import Reservation, StockAdjustment
 
 
-def placeholder(request, *args, **kwargs):
-    return HttpResponse("Page under construction")
-
-
+@staff_required
 def inventory_dashboard(request):
     components = [
         {"item": item, **stock_position("component", item)}
@@ -39,6 +36,7 @@ def inventory_dashboard(request):
     )
 
 
+@staff_required
 @require_POST
 def inspect_cancelled_stock(request, pk):
     form = CancelledStockInspectionForm(request.POST)
@@ -48,7 +46,7 @@ def inspect_cancelled_stock(request, pk):
 
     with transaction.atomic():
         reservation = get_object_or_404(
-            Reservation.objects.select_for_update(), pk=pk, component__isnull=False,
+            Reservation.objects, pk=pk, component__isnull=False,
             purchased_pc__status="cancelled", status=Reservation.Status.RESERVED,
         )
         quantity = form.cleaned_data["quantity"]
@@ -81,6 +79,7 @@ def inspect_cancelled_stock(request, pk):
     return redirect("inventory:inventory_dashboard")
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def adjustment_create(request):
     form = StockAdjustmentForm(request.POST if request.method == "POST" else None)
@@ -89,7 +88,7 @@ def adjustment_create(request):
             item_type = form.cleaned_data["item_type"]
             item = form.cleaned_data["component"] or form.cleaned_data["accessory"]
             item_model = Component if item_type == "component" else Accessory
-            locked_item = get_object_or_404(item_model.objects.select_for_update(), pk=item.pk)
+            locked_item = get_object_or_404(item_model, pk=item.pk)
             current = stock_position(item_type, locked_item)
             delta = form.cleaned_data["delta"]
             if delta < 0 and -delta > current["available"]:

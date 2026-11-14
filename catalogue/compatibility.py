@@ -22,12 +22,12 @@ def component_name(component):
     return f"{component.get_category_display()} {component.brand} {component.model}"
 
 
-def check_compatibility(components):
+def check_compatibility(components, *, require_active=True):
     components = list(components)
     problems = []
 
     for component in components:
-        if not component.active:
+        if require_active and not component.active:
             problems.append(f"{component_name(component)} is inactive and cannot be sold.")
         for field in REQUIRED_SPECS.get(component.category, ()):
             if not getattr(component, field).strip():
@@ -73,7 +73,7 @@ def check_compatibility(components):
     return problems
 
 
-def check_configuration_components(components):
+def check_configuration_components(components, *, require_active=True):
     components = list(components)
     categories = {component.category for component in components}
     missing = [
@@ -81,24 +81,35 @@ def check_configuration_components(components):
         for category in REQUIRED_CONFIGURATION_CATEGORIES
         if category not in categories
     ]
-    problems = check_compatibility(components)
+    problems = check_compatibility(components, require_active=require_active)
     if missing:
         problems.insert(0, f"Configuration is missing required categories: {', '.join(missing)}.")
     return problems
 
 
-def check_configuration(configuration):
-    return check_configuration_components(configuration.components.all())
+def check_preset_items(items):
+    items = list(items)
+    components = [item.component for item in items]
+    problems = check_configuration_components(components)
+    if len({component.category for component in components}) != len(components):
+        problems.append("Choose one component model per category. Use quantity for identical units.")
+    if any(item.component.category in (Component.Category.CPU, Component.Category.GPU)
+           and item.quantity != 1 for item in items):
+        problems.append("Published presets must have exactly one CPU and one graphics card.")
+    return problems
 
 
 def revalidate_configurations(components):
     component_ids = [component.pk for component in components if component.pk]
     if not component_ids:
-        return
+        return []
     affected = Configuration.objects.filter(
         status=Configuration.Status.PUBLISHED, components__pk__in=component_ids
-    ).distinct()
+    ).distinct().prefetch_related("items__component")
+    moved_to_draft = []
     for configuration in affected:
-        if check_configuration(configuration):
+        if check_preset_items(configuration.items.all()):
             configuration.status = Configuration.Status.DRAFT
             configuration.save(update_fields=("status",))
+            moved_to_draft.append(configuration.name)
+    return moved_to_draft

@@ -1,41 +1,50 @@
-from django.contrib import messages
-from decimal import Decimal, InvalidOperation
-from django.contrib.auth.decorators import user_passes_test
-from django.db import transaction
-from django.db.models import Q
-from django.http import Http404, HttpResponse
-from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from uuid import uuid4
 
-from accounts.models import Employee, StaffAction
-from accounts.models import Customer
-from accounts.views import active_manager
+from django.contrib import messages
+from django.contrib.auth.decorators import user_passes_test
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_http_methods, require_POST
+
+from accounts.models import StaffAction
+from accounts.views import active_manager, staff_required
 from inventory.availability import available_accessory_quantity
-from .compatibility import check_compatibility, check_configuration_components, revalidate_configurations
+from support.models import Review
+from .compatibility import check_compatibility, check_configuration_components, check_preset_items, revalidate_configurations
 from .forms import (
     AccessoryForm,
     AssemblyFeeForm,
+    BuildForm,
     ComponentConflictForm,
     ComponentForm,
     ConfigurationForm,
     ConfigurationItemFormSet,
+    PresetFilterForm,
 )
 from .models import Accessory, AssemblyFeeSetting, Component, ComponentConflict, Configuration, ConfigurationItem
-from .pricing import available_preset_quantity, calculate_pc_price
-from inventory.availability import available_component_quantity
+from .drafts import build_revision
+from .pricing import available_preset_quantity, calculate_pc_price, current_assembly_fee
 from recommendations.accessories import accessory_suggestions
+from recommendations.models import GameSettingSupport
+from recommendations.predictor import predict_fps
+from recommendations.preferences import previous_response
 
 
-def placeholder(request, *args, **kwargs):
-    return HttpResponse("Page under construction")
+@require_POST
+def start_new_build(request):
+    request.session.pop("current_build", None)
+    return redirect("catalogue:configure")
 
 
 @require_http_methods(["GET", "POST"])
 def configure(request):
-    from recommendations.models import GameSettingSupport
-    from recommendations.predictor import predict_fps
-
     session_build = request.session.get("current_build", {})
+    action = request.POST.get("action")
+    if action in ("complete", "shortlist") and request.POST.get("build_revision") != build_revision(session_build):
+        messages.error(request, "Your current build changed. Review the selections before saving.")
+        return redirect("catalogue:configure")
     preset_id = request.GET.get("preset") if request.method == "GET" else None
     if preset_id:
         try:
@@ -52,31 +61,36 @@ def configure(request):
             ],
         }
     selected_ids = {row["component_id"]: row["quantity"] for row in session_build.get("components", [])}
-    if request.method == "POST":
+    form = BuildForm(request.POST if request.method == "POST" else None)
+    valid_submission = form.is_bound and form.is_valid()
+    if valid_submission:
         previous_quantities = selected_ids
         previous_components = Component.objects.in_bulk(previous_quantities)
         selected_ids = {}
-        for category, label in Component.Category.choices:
-            raw_id = request.POST.get(f"component_{category}", "").strip()
-            if raw_id:
-                try:
-                    component = Component.objects.get(pk=int(raw_id), category=category, active=True)
-                except (ValueError, Component.DoesNotExist):
-                    messages.error(request, f"Select an active {label.lower()}.")
-                    return redirect("catalogue:configure")
-                category_parts = [
-                    pk for pk in previous_quantities
-                    if pk in previous_components and previous_components[pk].category == category
-                ]
-                if category_parts and component.pk == category_parts[0]:
-                    selected_ids.update({pk: previous_quantities[pk] for pk in category_parts})
-                else:
-                    selected_ids[component.pk] = previous_quantities.get(component.pk, 1)
+        for category in Component.Category.values:
+            component = form.cleaned_data[f"component_{category}"]
+            if not component:
+                continue
+            category_parts = [
+                pk for pk in previous_quantities
+                if pk in previous_components and previous_components[pk].category == category
+            ]
+            if category_parts and component.pk == category_parts[0]:
+                selected_ids.update({pk: previous_quantities[pk] for pk in category_parts})
+            else:
+                selected_ids[component.pk] = previous_quantities.get(component.pk, 1)
         session_build = {
-            "name": request.POST.get("name", "My custom PC").strip()[:160] or "My custom PC",
+            "name": form.cleaned_data["name"] or "My custom PC",
             "preset_id": session_build.get("preset_id"),
             "components": [{"component_id": pk, "quantity": quantity} for pk, quantity in selected_ids.items()],
         }
+        request.session["current_build"] = session_build
+        if action == "shortlist":
+            return redirect("recommendations:shortlist_save")
+        if action != "complete":
+            return redirect("catalogue:configure")
+    elif preset_id:
+        request.session["current_build"] = session_build
     components = Component.objects.filter(pk__in=selected_ids)
     component_map = {component.pk: component for component in components}
     items = [ConfigurationItem(component=component_map[pk], quantity=quantity) for pk, quantity in selected_ids.items() if pk in component_map]
@@ -85,49 +99,61 @@ def configure(request):
         issues.append(f"Saved component #{component_id} is no longer in the catalogue. Choose a replacement or update the build to remove it.")
     fee = current_assembly_fee()
     price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
-    available = min((available_component_quantity(item.component) // item.quantity for item in items), default=0) if items and not issues else 0
+    available = available_preset_quantity(items) if items and not issues else 0
+    if valid_submission:
+        if not issues and available > 0 and fee:
+            completed = request.session.get("completed_builds", [])
+            completed.append({"id": uuid4().hex, "name": session_build["name"], "components": session_build["components"]})
+            request.session["completed_builds"] = completed
+            messages.success(request, "Build saved for comparison.")
+        else:
+            messages.error(request, "Complete an available, compatible build before saving it for comparison.")
+        return redirect("catalogue:configure")
     rows = []
+    selected_components = (
+        [value for field, value in form.cleaned_data.items() if field.startswith("component_") and value]
+        if form.errors else list(component_map.values())
+    )
     for category, label in Component.Category.choices:
-        choices = list(Component.objects.filter(Q(active=True) | Q(pk__in=selected_ids), category=category).order_by("brand", "model"))
-        other_components = [item.component for item in items if item.component.category != category]
-        choices.sort(key=lambda component: bool(check_compatibility([*other_components, component])))
+        choices = Component.objects.filter(
+            Q(active=True) | Q(pk__in=selected_ids), category=category,
+        ).order_by("brand", "model")
+        other_components = [component for component in selected_components if component.category != category]
+        options = [
+            {"component": component, "issues": check_compatibility([*other_components, component])}
+            for component in choices
+        ]
+        options.sort(key=lambda option: bool(option["issues"]))
+        field = form[f"component_{category}"]
+        selected = field.value() if form.is_bound else next(
+            (pk for pk in selected_ids if pk in component_map and component_map[pk].category == category), ""
+        )
         rows.append({
             "category": category,
             "label": label,
-            "choices": [{"component": component, "issues": check_compatibility([*other_components, component])} for component in choices],
-            "selected": next((pk for pk in selected_ids if component_map.get(pk) and component_map[pk].category == category), ""),
+            "choices": options,
+            "selected": str(selected or ""),
+            "errors": field.errors,
         })
-    questionnaire = None
-    from recommendations.views import _customer, _previous_response
-    questionnaire = _previous_response(request, _customer(request))
+    if form.errors:
+        items, issues, price, available = [], [], None, 0
+    questionnaire = previous_response(request)
     estimates = []
-    if questionnaire and not issues:
+    if questionnaire and not issues and not form.errors:
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(game=setting.game, resolution=setting.resolution, graphics_preset=setting.graphics_preset).exists()
             estimates.append({"setting": setting, "fps": predict_fps(items, setting) if supported else None})
-    if request.method == "POST":
-        request.session["current_build"] = session_build
-        if request.POST.get("action") == "shortlist":
-            return redirect("recommendations:shortlist_save")
-        if request.POST.get("action") == "complete" and not issues and available > 0:
-            import uuid
-            completed = request.session.get("completed_builds", [])
-            build_id = uuid.uuid4().hex
-            completed.append({"id": build_id, "name": session_build["name"], "components": session_build["components"]})
-            request.session["completed_builds"] = completed
-            messages.success(request, "Build saved for comparison.")
-            return redirect("catalogue:configure")
-        return redirect("catalogue:configure")
-    request.session["current_build"] = session_build
     return render(request, "catalogue/configure.html", {
-        "name": session_build.get("name", "My custom PC"), "preset_id": session_build.get("preset_id"),
+        "name": form["name"].value() if form.is_bound else session_build.get("name", "My custom PC"),
+        "form": form, "preset_id": session_build.get("preset_id"), "build_revision": build_revision(session_build),
         "rows": rows, "items": items, "issues": issues, "price": price, "fee": fee,
-        "available": available, "estimates": estimates, "complete": not issues,
+        "available": available, "estimates": estimates, "complete": not issues and not form.errors and fee is not None,
         "completed_builds": request.session.get("completed_builds", []),
-        "accessory_suggestions": accessory_suggestions(items) if not issues else [],
+        "accessory_suggestions": accessory_suggestions(items) if items and not issues else [],
     })
 
 
+@staff_required
 def component_list(request):
     return render(
         request,
@@ -136,6 +162,7 @@ def component_list(request):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def component_create(request):
     form = ComponentForm(request.POST if request.method == "POST" else None)
@@ -153,6 +180,7 @@ def component_create(request):
     return render(request, "catalogue/component_form.html", {"form": form, "title": "Add component"})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def component_update(request, pk):
     component = get_object_or_404(Component, pk=pk)
@@ -161,7 +189,7 @@ def component_update(request, pk):
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             component = form.save()
-            revalidate_configurations([component])
+            moved_to_draft = revalidate_configurations([component])
             if old_active != component.active:
                 action_type = "component_deactivated" if not component.active else "component_reactivated"
             else:
@@ -173,6 +201,8 @@ def component_update(request, pk):
                 detail=f"Updated {component.category}: {component.brand} {component.model}.",
             )
         messages.success(request, "Component updated.")
+        if moved_to_draft:
+            messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
         return redirect("catalogue:component_list")
     return render(
         request,
@@ -181,6 +211,7 @@ def component_update(request, pk):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_manage_list(request):
     accessories = [
@@ -207,6 +238,7 @@ def accessory_list(request):
     })
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_create(request):
     form = AccessoryForm(request.POST if request.method == "POST" else None)
@@ -224,6 +256,7 @@ def accessory_create(request):
     return render(request, "catalogue/accessory_form.html", {"form": form, "title": "Add accessory"})
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def accessory_update(request, pk):
     accessory = get_object_or_404(Accessory, pk=pk)
@@ -252,13 +285,14 @@ def accessory_update(request, pk):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def compatibility_rules(request):
     form = ComponentConflictForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             conflict = form.save()
-            revalidate_configurations([conflict.component_a, conflict.component_b])
+            moved_to_draft = revalidate_configurations([conflict.component_a, conflict.component_b])
             StaffAction.objects.create(
                 employee=request.user.employee_profile,
                 action_type="component_conflict_added",
@@ -269,6 +303,8 @@ def compatibility_rules(request):
                 ),
             )
         messages.success(request, "Compatibility rule added.")
+        if moved_to_draft:
+            messages.warning(request, f"Moved to Draft in Manage PC presets: {', '.join(moved_to_draft)}.")
         return redirect("catalogue:compatibility_rules")
     return render(
         request,
@@ -282,11 +318,12 @@ def compatibility_rules(request):
     )
 
 
-@require_http_methods(["POST"])
+@staff_required
+@require_POST
 def compatibility_rule_delete(request, pk):
     with transaction.atomic():
         conflict = get_object_or_404(
-            ComponentConflict.objects.select_for_update().select_related(
+            ComponentConflict.objects.select_related(
                 "component_a", "component_b"
             ),
             pk=pk,
@@ -305,16 +342,12 @@ def compatibility_rule_delete(request, pk):
     return redirect("catalogue:compatibility_rules")
 
 
-def current_assembly_fee():
-    return AssemblyFeeSetting.objects.order_by("-updated_at", "-pk").first()
-
-
 def _preset_rows(configurations):
     fee = current_assembly_fee()
     presets = []
     for configuration in configurations:
         items = list(configuration.items.all())
-        issues = check_configuration_components(item.component for item in items)
+        issues = check_preset_items(items)
         price = calculate_pc_price(items, fee.fee_amount) if fee and not issues else None
         presets.append(
             {
@@ -328,6 +361,7 @@ def _preset_rows(configurations):
     return presets, fee
 
 
+@staff_required
 def preset_manage_list(request):
     presets, fee = _preset_rows(
         Configuration.objects.prefetch_related("items__component").order_by("name")
@@ -352,25 +386,18 @@ def preset_list(request):
         status=Configuration.Status.DRAFT, name__startswith="[Demo]"
     ).prefetch_related("items__component").order_by("name")
     presets, fee = _preset_rows(query)
-    min_price = request.GET.get("min_price", "").strip()
-    max_price = request.GET.get("max_price", "").strip()
-    tier = request.GET.get("tier", "").strip()
-    availability = request.GET.get("availability", "all")
-    filter_error = ""
-    try:
-        minimum = Decimal(min_price) if min_price else None
-        maximum = Decimal(max_price) if max_price else None
-        if (minimum is not None and minimum < 0) or (maximum is not None and maximum < 0):
-            raise InvalidOperation
-    except InvalidOperation:
-        minimum = maximum = None
-        filter_error = "Enter valid non-negative price limits."
     tiers = sorted({
         item.component.ml_tier
         for row in presets
         for item in row["configuration"].items.all()
         if item.component.category == Component.Category.GPU and item.component.ml_tier
     })
+    filter_form = PresetFilterForm(request.GET, tiers=tiers)
+    filter_form.is_valid()
+    minimum = filter_form.cleaned_data.get("min_price") if not filter_form.errors else None
+    maximum = filter_form.cleaned_data.get("max_price") if not filter_form.errors else None
+    tier = filter_form.cleaned_data.get("tier")
+    availability = filter_form.cleaned_data.get("availability") or "all"
     if tier:
         presets = [row for row in presets if any(
             item.component.category == Component.Category.GPU and item.component.ml_tier == tier
@@ -393,44 +420,28 @@ def preset_list(request):
             "has_published_presets": has_published_presets,
             "assembly_fee": fee.fee_amount if fee else None,
             "has_fee": fee is not None,
-            "min_price": min_price,
-            "max_price": max_price,
-            "tier": tier,
+            "min_price": filter_form["min_price"].value(),
+            "max_price": filter_form["max_price"].value(),
+            "tier": request.GET.get("tier", ""),
             "tiers": tiers,
-            "availability": availability,
-            "filter_error": filter_error,
+            "availability": filter_form["availability"].value() or "all",
+            "filter_form": filter_form,
+            "has_build_draft": bool(request.session.get("current_build", {}).get("components")
+                                    or request.session.get("current_build", {}).get("preset_id")),
         },
     )
 
 
 def preset_detail(request, pk):
-    from support.models import Review
     configuration = get_object_or_404(
         Configuration.objects.prefetch_related("items__component"),
         pk=pk,
         status=Configuration.Status.PUBLISHED,
     )
     presets, fee = _preset_rows([configuration])
-    customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-    questionnaire = None
+    questionnaire = previous_response(request)
     game_needs = []
-    if customer:
-        from recommendations.models import GameSettingSupport
-
-        questionnaire = customer.questionnaires.order_by("-created_at", "-pk").first()
-    else:
-        from recommendations.models import GameSettingSupport, QuestionnaireResponse
-
-    if not questionnaire and request.session.get("questionnaire_response_id"):
-        from recommendations.models import QuestionnaireResponse
-
-        saved_response = QuestionnaireResponse.objects.filter(
-            pk=request.session["questionnaire_response_id"]
-        ).first()
-        if saved_response and (saved_response.customer_id is None or saved_response.customer_id == getattr(customer, "pk", None)):
-            questionnaire = saved_response
     if questionnaire:
-        from recommendations.predictor import predict_fps
         for setting in questionnaire.game_settings.select_related("game").order_by("game__name"):
             supported = GameSettingSupport.objects.filter(
                 game=setting.game,
@@ -457,54 +468,45 @@ def preset_detail(request, pk):
     )
 
 
-def _edit_preset(request, configuration=None):
-    creating = configuration is None
-    configuration = configuration or Configuration()
-    form = ConfigurationForm(
-        request.POST if request.method == "POST" else None, instance=configuration
-    )
-    formset = ConfigurationItemFormSet(
-        request.POST if request.method == "POST" else None,
-        instance=configuration,
-        prefix="items",
-    )
-    if request.method == "POST" and form.is_valid() and formset.is_valid():
-        items = [
-            item_form.cleaned_data
-            for item_form in formset.forms
-            if item_form.cleaned_data
-            and not item_form.cleaned_data.get("DELETE")
-            and item_form.cleaned_data.get("component")
-        ]
-        components = [item["component"] for item in items]
-        fee = current_assembly_fee()
-        if form.cleaned_data["status"] == Configuration.Status.PUBLISHED:
-            if fee is None:
-                form.add_error("status", "Set the shared assembly fee before publishing a preset.")
-            if len({component.category for component in components}) != len(components):
-                form.add_error(None, "Choose one component model per category. Use quantity for identical units.")
-            if any(
-                item["component"].category in (Component.Category.CPU, Component.Category.GPU)
-                and item["quantity"] != 1
-                for item in items
-            ):
-                form.add_error(None, "Published presets must have exactly one CPU and one graphics card.")
-            for issue in check_configuration_components(components):
-                form.add_error(None, issue)
-
-        if not form.errors:
-            with transaction.atomic():
-                configuration = form.save()
-                formset.instance = configuration
-                formset.save()
-                StaffAction.objects.create(
-                    employee=request.user.employee_profile,
-                    action_type="configuration_created" if creating else "configuration_updated",
-                    object_ref=str(configuration.pk),
-                    detail=f"Saved preset {configuration.name} with status {configuration.status}.",
-                )
-            messages.success(request, "Preset saved.")
-            return redirect("catalogue:preset_manage_list")
+def _edit_preset(request, pk=None):
+    creating = pk is None
+    if request.method == "POST":
+        with transaction.atomic():
+            configuration = Configuration() if creating else get_object_or_404(Configuration, pk=pk)
+            form = ConfigurationForm(request.POST, instance=configuration)
+            formset = ConfigurationItemFormSet(request.POST, instance=configuration, prefix="items")
+            form_valid = form.is_valid()
+            items_valid = formset.is_valid()
+            if form_valid and items_valid:
+                publishing = form.cleaned_data["status"] == Configuration.Status.PUBLISHED
+                if publishing and current_assembly_fee() is None:
+                    form.add_error("status", "Set the shared assembly fee before publishing a preset.")
+                if not form.errors:
+                    try:
+                        with transaction.atomic():
+                            configuration = form.save()
+                            formset.instance = configuration
+                            formset.save()
+                            if publishing:
+                                for issue in check_preset_items(configuration.items.select_related("component")):
+                                    form.add_error(None, issue)
+                                if form.errors:
+                                    transaction.set_rollback(True)
+                    except IntegrityError:
+                        form.add_error(None, "These component rows could not be saved. Reload the preset and try again.")
+                if not form.errors:
+                    StaffAction.objects.create(
+                        employee=request.user.employee_profile,
+                        action_type="configuration_created" if creating else "configuration_updated",
+                        object_ref=str(configuration.pk),
+                        detail=f"Saved preset {configuration.name} with status {configuration.status}.",
+                    )
+                    messages.success(request, "Preset saved.")
+                    return redirect("catalogue:preset_manage_list")
+    else:
+        configuration = Configuration() if creating else get_object_or_404(Configuration, pk=pk)
+        form = ConfigurationForm(instance=configuration)
+        formset = ConfigurationItemFormSet(instance=configuration, prefix="items")
     return render(
         request,
         "catalogue/preset_form.html",
@@ -512,14 +514,16 @@ def _edit_preset(request, configuration=None):
     )
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def preset_create(request):
     return _edit_preset(request)
 
 
+@staff_required
 @require_http_methods(["GET", "POST"])
 def preset_update(request, pk):
-    return _edit_preset(request, get_object_or_404(Configuration, pk=pk))
+    return _edit_preset(request, pk)
 
 
 @user_passes_test(active_manager, login_url="staff_login")

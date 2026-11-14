@@ -2,6 +2,10 @@ from django.conf import settings
 from django.db import models
 
 
+def specification_fields(specs):
+    return specs if isinstance(specs, dict) else {}
+
+
 class Component(models.Model):
     class Category(models.TextChoices):
         CPU = "cpu", "CPU"

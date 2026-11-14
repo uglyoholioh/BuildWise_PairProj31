@@ -73,6 +73,8 @@ def substitution_issues(purchased_pc, original, replacement):
     problems = []
     if original.pk == replacement.pk or original.category != replacement.category:
         problems.append("Choose a different component in the same category.")
+    if not replacement.active:
+        problems.append("The proposed component is no longer available for sale.")
     actual = reserved_pc_quantities(purchased_pc)
     # The replaced unit may be missing after QC removed a faulty unit.
     for component_id, quantity in expected.items():
@@ -88,7 +90,7 @@ def substitution_issues(purchased_pc, original, replacement):
     components = Component.objects.in_bulk(ids)
     if len(components) != len(ids):
         problems.append("A required component no longer exists.")
-    problems.extend(check_configuration_components(components.values()))
+    problems.extend(check_configuration_components(components.values(), require_active=False))
     if available_component_quantity(replacement) < 1:
         problems.append("The proposed component is no longer available.")
     return problems
@@ -105,8 +107,6 @@ def purchased_pc_allocation_issues(purchased_pc):
     for component_id, quantity in expected.items():
         component = components.get(component_id)
         label = str(component) if component else f"Component {component_id}"
-        if component and not component.active:
-            problems.append(f"{label} is inactive.")
         if actual.get(component_id, 0) != quantity:
             problems.append(f"{label} is not fully reserved.")
     if any(component_id not in expected for component_id in actual):
